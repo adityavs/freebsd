@@ -45,6 +45,7 @@ __DEFAULT_YES_OPTIONS = \
 
 __DEFAULT_NO_OPTIONS = \
     EISA \
+    EXTRA_TCP_STACKS \
     NAND \
     OFED
 
@@ -64,7 +65,7 @@ BROKEN_OPTIONS+= CDDL ZFS
 .endif
 
 .if ${MACHINE_CPUARCH} == "mips"
-BROKEN_OPTIONS+= CDDL ZFS
+BROKEN_OPTIONS+= CDDL ZFS SSP
 .endif
 
 .if ${MACHINE_CPUARCH} == "powerpc" && ${MACHINE_ARCH} == "powerpc"

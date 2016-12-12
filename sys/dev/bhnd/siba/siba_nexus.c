@@ -75,24 +75,30 @@ siba_nexus_probe(device_t dev)
 		return (error);
 	}
 
+	/* Set device description */
+	bhnd_set_default_bus_desc(dev, &sc->siba_cid);
+
 	return (0);
 }
 
 static int
 siba_nexus_attach(device_t dev)
 {
-	struct siba_nexus_softc	*sc;
 	int error;
 
-	sc = device_get_softc(dev);
+	/* Perform initial attach and enumerate our children. */
+	if ((error = siba_attach(dev)))
+		goto failed;
 
-	/* Enumerate the bus. */
-	if ((error = siba_add_children(dev, NULL))) {
-		device_printf(dev, "error %d enumerating children\n", error);
-		return (error);
-	}
+	/* Delegate remainder to standard bhnd method implementation */
+	if ((error = bhnd_generic_attach(dev)))
+		goto failed;
 
-	return (siba_attach(dev));
+	return (0);
+
+failed:
+	device_delete_children(dev);
+	return (error);
 }
 
 static const struct bhnd_chipid *
@@ -115,4 +121,5 @@ static device_method_t siba_nexus_methods[] = {
 DEFINE_CLASS_2(bhnd, siba_nexus_driver, siba_nexus_methods,
     sizeof(struct siba_nexus_softc), bhnd_nexus_driver, siba_driver);
 
-DRIVER_MODULE(siba_nexus, nexus, siba_nexus_driver, bhnd_devclass, 0, 0);
+EARLY_DRIVER_MODULE(siba_nexus, nexus, siba_nexus_driver, bhnd_devclass, 0, 0,
+    BUS_PASS_BUS + BUS_PASS_ORDER_MIDDLE);

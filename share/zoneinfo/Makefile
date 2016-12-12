@@ -67,6 +67,10 @@ TZBUILDSUBDIRS=	\
 		Pacific \
 		SystemV
 
+.if defined(OLDTIMEZONES)
+TZBUILDSUBDIRS+= US Mexico Chile Canada Brazil
+.endif
+
 .if !defined(_SKIP_BUILD)
 all: zoneinfo
 .endif
@@ -82,10 +86,10 @@ zoneinfo: yearistype ${TDATA}
 beforeinstall: install-zoneinfo
 install-zoneinfo:
 	cd ${TZBUILDDIR} && \
-	    find -s * -type f -print -exec ${INSTALL} \
+	    find -s * -type f -print -exec ${INSTALL} ${TAG_ARGS} \
 	    -o ${BINOWN} -g ${BINGRP} -m ${NOBINMODE} \
 	    \{} ${DESTDIR}/usr/share/zoneinfo/\{} \;
-	${INSTALL} -o ${BINOWN} -g ${BINGRP} -m ${NOBINMODE} \
+	${INSTALL} ${TAG_ARGS} -o ${BINOWN} -g ${BINGRP} -m ${NOBINMODE} \
 	    ${CONTRIBDIR}/zone.tab ${DESTDIR}/usr/share/zoneinfo/
 
 afterinstall:

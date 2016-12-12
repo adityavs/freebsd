@@ -68,21 +68,15 @@ FBSD_1.0 {
 	arc4random_addrandom;
 	arc4random_stir;
 	__assert;
-	basename;
 	check_utility_compat;
 	clock;
 	closedir;
 	confstr;
-	encrypt;
-	des_setkey;
-	des_cipher;
-	setkey;
 	ctermid;
 	ctermid_r;
 	daemon;
 	devname;
 	devname_r;
-	dirname;
 	getdiskbyname;
 	dladdr;
 	dlclose;
@@ -410,10 +404,17 @@ FBSD_1.3 {
 };
 
 FBSD_1.4 {
+	getnetgrent_r;
 	pthread_mutex_consistent;
 	pthread_mutexattr_getrobust;
 	pthread_mutexattr_setrobust;
 	scandir_b;
+	stravis;
+};
+
+FBSD_1.5 {
+	basename;
+	dirname;
 };
 
 FBSDprivate_1.0 {

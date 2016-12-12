@@ -54,6 +54,10 @@ __FBSDID("$FreeBSD$");
 #include <sys/syscallsubr.h>
 #include <sys/sysctl.h>
 
+#ifdef DDB
+#include <ddb/ddb.h>
+#endif
+
 #include <net/vnet.h>
 
 #include <security/mac/mac_framework.h>
@@ -1256,6 +1260,23 @@ kern_kldstat(struct thread *td, int fileid, struct kld_file_stat *stat)
 	return (0);
 }
 
+#ifdef DDB
+DB_COMMAND(kldstat, db_kldstat)
+{
+	linker_file_t lf;
+
+#define	POINTER_WIDTH	((int)(sizeof(void *) * 2 + 2))
+	db_printf("Id Refs Address%*c Size     Name\n", POINTER_WIDTH - 7, ' ');
+#undef	POINTER_WIDTH
+	TAILQ_FOREACH(lf, &linker_files, link) {
+		if (db_pager_quit)
+			return;
+		db_printf("%2d %4d %p %-8zx %s\n", lf->id, lf->refs,
+		    lf->address, lf->size, lf->filename);
+	}
+}
+#endif /* DDB */
+
 int
 sys_kldfirstmod(struct thread *td, struct kldfirstmod_args *uap)
 {
@@ -1578,7 +1599,6 @@ restart:
 			if (error)
 				panic("cannot add dependency");
 		}
-		lf->userrefs++;	/* so we can (try to) kldunload it */
 		error = linker_file_lookup_set(lf, MDT_SETNAME, &start,
 		    &stop, NULL);
 		if (!error) {
@@ -1616,6 +1636,8 @@ restart:
 			goto fail;
 		}
 		linker_file_register_modules(lf);
+		if (!TAILQ_EMPTY(&lf->modules))
+			lf->flags |= LINKER_FILE_MODULES;
 		if (linker_file_lookup_set(lf, "sysinit_set", &si_start,
 		    &si_stop, NULL) == 0)
 			sysinit_add(si_start, si_stop);
@@ -1631,6 +1653,41 @@ fail:
 }
 
 SYSINIT(preload, SI_SUB_KLD, SI_ORDER_MIDDLE, linker_preload, 0);
+
+/*
+ * Handle preload files that failed to load any modules.
+ */
+static void
+linker_preload_finish(void *arg)
+{
+	linker_file_t lf, nlf;
+
+	sx_xlock(&kld_sx);
+	TAILQ_FOREACH_SAFE(lf, &linker_files, link, nlf) {
+		/*
+		 * If all of the modules in this file failed to load, unload
+		 * the file and return an error of ENOEXEC.  (Parity with
+		 * linker_load_file.)
+		 */
+		if ((lf->flags & LINKER_FILE_MODULES) != 0 &&
+		    TAILQ_EMPTY(&lf->modules)) {
+			linker_file_unload(lf, LINKER_UNLOAD_FORCE);
+			continue;
+		}
+
+		lf->flags &= ~LINKER_FILE_MODULES;
+		lf->userrefs++;	/* so we can (try to) kldunload it */
+	}
+	sx_xunlock(&kld_sx);
+}
+
+/*
+ * Attempt to run after all DECLARE_MODULE SYSINITs.  Unfortunately they can be
+ * scheduled at any subsystem and order, so run this as late as possible.  init
+ * becomes runnable in SI_SUB_KTHREAD_INIT, so go slightly before that.
+ */
+SYSINIT(preload_finish, SI_SUB_KTHREAD_INIT - 100, SI_ORDER_MIDDLE,
+    linker_preload_finish, 0);
 
 /*
  * Search for a not-loaded module by name.

@@ -90,6 +90,8 @@
     cam
         ata
         ..
+        nvme
+        ..
         scsi
         ..
     ..
@@ -108,11 +110,15 @@
         ..
         ciss
         ..
+        evdev
+        ..
         filemon
         ..
         firewire
         ..
         hwpmc
+        ..
+        hyperv
         ..
         ic
         ..
@@ -332,6 +338,8 @@
     ssp
     ..
     sys
+        disk
+        ..
     ..
     teken
     ..

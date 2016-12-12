@@ -15,7 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -72,7 +72,11 @@ __FBSDID("$FreeBSD$");
  * Note that stdarg.h and the ANSI style va_start macro is used for both
  * ANSI and traditional C compilers.
  */
+#ifdef _KERNEL
 #include <machine/stdarg.h>
+#else
+#include <stdarg.h>
+#endif
 
 #ifdef _KERNEL
 
@@ -730,7 +734,15 @@ reswitch:	switch (ch = (u_char)*fmt++) {
 				PCHAR('>');
 			break;
 		case 'c':
+			width -= 1;
+
+			if (!ladjust && width > 0)
+				while (width--)
+					PCHAR(padc);
 			PCHAR(va_arg(ap, int));
+			if (ladjust && width > 0)
+				while (width--)
+					PCHAR(padc);
 			break;
 		case 'D':
 			up = va_arg(ap, u_char *);
@@ -1188,3 +1200,24 @@ sbuf_hexdump(struct sbuf *sb, const void *ptr, int length, const char *hdr,
 	}
 }
 
+#ifdef _KERNEL
+void
+counted_warning(unsigned *counter, const char *msg)
+{
+	struct thread *td;
+	unsigned c;
+
+	for (;;) {
+		c = *counter;
+		if (c == 0)
+			break;
+		if (atomic_cmpset_int(counter, c, c - 1)) {
+			td = curthread;
+			log(LOG_INFO, "pid %d (%s) %s%s\n",
+			    td->td_proc->p_pid, td->td_name, msg,
+			    c > 1 ? "" : " - not logging anymore");
+			break;
+		}
+	}
+}
+#endif

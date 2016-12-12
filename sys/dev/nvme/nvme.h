@@ -47,7 +47,8 @@
  */
 #define NVME_GLOBAL_NAMESPACE_TAG	((uint32_t)0xFFFFFFFF)
 
-#define NVME_MAX_XFER_SIZE		MAXPHYS
+/* Cap nvme to 1MB transfers driver explodes with larger sizes */
+#define NVME_MAX_XFER_SIZE		(MAXPHYS < (1<<20) ? MAXPHYS : (1<<20))
 
 union cap_lo_register {
 	uint32_t	raw;
@@ -662,9 +663,27 @@ enum nvme_log_page {
 	NVME_LOG_ERROR			= 0x01,
 	NVME_LOG_HEALTH_INFORMATION	= 0x02,
 	NVME_LOG_FIRMWARE_SLOT		= 0x03,
-	/* 0x04-0x7F - reserved */
+	NVME_LOG_CHANGED_NAMESPACE	= 0x04,
+	NVME_LOG_COMMAND_EFFECT		= 0x05,
+	/* 0x06-0x7F - reserved */
 	/* 0x80-0xBF - I/O command set specific */
+	NVME_LOG_RES_NOTIFICATION	= 0x80,
 	/* 0xC0-0xFF - vendor specific */
+
+	/*
+	 * The following are Intel Specific log pages, but they seem
+	 * to be widely implemented.
+	 */
+	INTEL_LOG_READ_LAT_LOG		= 0xc1,
+	INTEL_LOG_WRITE_LAT_LOG		= 0xc2,
+	INTEL_LOG_TEMP_STATS		= 0xc5,
+	INTEL_LOG_ADD_SMART		= 0xca,
+	INTEL_LOG_DRIVE_MKT_NAME	= 0xdd,
+
+	/*
+	 * HGST log page, with lots ofs sub pages.
+	 */
+	HGST_INFO_LOG			= 0xc1,
 };
 
 struct nvme_error_information_entry {
@@ -723,8 +742,11 @@ struct nvme_health_information_page {
 	uint64_t		unsafe_shutdowns[2];
 	uint64_t		media_errors[2];
 	uint64_t		num_error_info_log_entries[2];
+	uint32_t		warning_temp_time;
+	uint32_t		error_temp_time;
+	uint16_t		temp_sensor[8];
 
-	uint8_t			reserved2[320];
+	uint8_t			reserved2[296];
 } __packed __aligned(4);
 
 struct nvme_firmware_page {
@@ -737,6 +759,19 @@ struct nvme_firmware_page {
 	uint8_t			reserved[7];
 	uint64_t		revision[7]; /* revisions for 7 slots */
 	uint8_t			reserved2[448];
+} __packed __aligned(4);
+
+struct intel_log_temp_stats
+{
+	uint64_t	current;
+	uint64_t	overtemp_flag_last;
+	uint64_t	overtemp_flag_life;
+	uint64_t	max_temp;
+	uint64_t	min_temp;
+	uint64_t	_rsvd[5];
+	uint64_t	max_oper_temp;
+	uint64_t	min_oper_temp;
+	uint64_t	est_offset;
 } __packed __aligned(4);
 
 #define NVME_TEST_MAX_THREADS	128
@@ -875,6 +910,8 @@ int	nvme_ns_cmd_deallocate(struct nvme_namespace *ns, void *payload,
 			       void *cb_arg);
 int	nvme_ns_cmd_flush(struct nvme_namespace *ns, nvme_cb_fn_t cb_fn,
 			  void *cb_arg);
+int	nvme_ns_dump(struct nvme_namespace *ns, void *virt, off_t offset,
+		     size_t len);
 
 /* Registration functions */
 struct nvme_consumer *	nvme_register_consumer(nvme_cons_ns_fn_t    ns_fn,
@@ -902,6 +939,52 @@ uint32_t	nvme_ns_get_stripesize(struct nvme_namespace *ns);
 
 int	nvme_ns_bio_process(struct nvme_namespace *ns, struct bio *bp,
 			    nvme_cb_fn_t cb_fn);
+
+/* Command building helper functions -- shared with CAM */
+static inline
+void	nvme_ns_flush_cmd(struct nvme_command *cmd, uint16_t nsid)
+{
+
+	cmd->opc = NVME_OPC_FLUSH;
+	cmd->nsid = nsid;
+}
+
+static inline
+void	nvme_ns_rw_cmd(struct nvme_command *cmd, uint32_t rwcmd, uint16_t nsid,
+    uint64_t lba, uint32_t count)
+{
+	cmd->opc = rwcmd;
+	cmd->nsid = nsid;
+	*(uint64_t *)&cmd->cdw10 = lba;
+	cmd->cdw12 = count-1;
+	cmd->cdw13 = 0;
+	cmd->cdw14 = 0;
+	cmd->cdw15 = 0;
+}
+
+static inline
+void	nvme_ns_write_cmd(struct nvme_command *cmd, uint16_t nsid,
+    uint64_t lba, uint32_t count)
+{
+	nvme_ns_rw_cmd(cmd, NVME_OPC_WRITE, nsid, lba, count);
+}
+
+static inline
+void	nvme_ns_read_cmd(struct nvme_command *cmd, uint16_t nsid,
+    uint64_t lba, uint32_t count)
+{
+	nvme_ns_rw_cmd(cmd, NVME_OPC_READ, nsid, lba, count);
+}
+
+static inline
+void	nvme_ns_trim_cmd(struct nvme_command *cmd, uint16_t nsid,
+    uint32_t num_ranges)
+{
+	cmd->opc = NVME_OPC_DATASET_MANAGEMENT;
+	cmd->nsid = nsid;
+	cmd->cdw10 = num_ranges - 1;
+	cmd->cdw11 = NVME_DSM_ATTR_DEALLOCATE;
+}
 
 #endif /* _KERNEL */
 
