@@ -931,9 +931,11 @@ dt_provmod_open(dt_provmod_t **provmod, dt_fdlist_t *dfp)
 			 * reallocate it. We normally won't need to do this
 			 * because providers aren't being loaded all the time.
 			 */
-			if ((p = realloc(p_providers,len)) == NULL)
+		        if ((p = realloc(p_providers,len)) == NULL) {
+			        free(p_providers);
 				/* How do we report errors here? */
 				return;
+			}
 			p_providers = p;
 		} else
 			break;
@@ -961,7 +963,7 @@ dt_provmod_open(dt_provmod_t **provmod, dt_fdlist_t *dfp)
 
 			(void) snprintf(path, sizeof (path), "/dev/dtrace/%s", p1);
 
-			if ((fd = open(path, O_RDONLY)) == -1)
+			if ((fd = open(path, O_RDONLY | O_CLOEXEC)) == -1)
 				continue; /* failed to open driver; just skip it */
 
 			if (((prov = malloc(sizeof (dt_provmod_t))) == NULL) ||
@@ -1098,7 +1100,7 @@ dt_vopen(int version, int flags, int *errp,
 	 */
 	dt_provmod_open(&provmod, &df);
 
-	dtfd = open("/dev/dtrace/dtrace", O_RDWR);
+	dtfd = open("/dev/dtrace/dtrace", O_RDWR | O_CLOEXEC);
 	err = errno; /* save errno from opening dtfd */
 #if defined(__FreeBSD__)
 	/*
@@ -1107,14 +1109,14 @@ dt_vopen(int version, int flags, int *errp,
 	 */
 	if (err == ENOENT && modfind("dtraceall") < 0) {
 		kldload("dtraceall"); /* ignore the error */
-		dtfd = open("/dev/dtrace/dtrace", O_RDWR);
+		dtfd = open("/dev/dtrace/dtrace", O_RDWR | O_CLOEXEC);
 		err = errno;
 	}
 #endif
 #ifdef illumos
 	ftfd = open("/dev/dtrace/provider/fasttrap", O_RDWR);
 #else
-	ftfd = open("/dev/dtrace/fasttrap", O_RDWR);
+	ftfd = open("/dev/dtrace/fasttrap", O_RDWR | O_CLOEXEC);
 #endif
 	fterr = ftfd == -1 ? errno : 0; /* save errno from open ftfd */
 
@@ -1144,12 +1146,11 @@ dt_vopen(int version, int flags, int *errp,
 		return (set_open_errno(dtp, errp, err));
 	}
 
-	(void) fcntl(dtfd, F_SETFD, FD_CLOEXEC);
-	(void) fcntl(ftfd, F_SETFD, FD_CLOEXEC);
-
 alloc:
-	if ((dtp = malloc(sizeof (dtrace_hdl_t))) == NULL)
+	if ((dtp = malloc(sizeof (dtrace_hdl_t))) == NULL) {
+	        dt_provmod_destroy(&provmod);
 		return (set_open_errno(dtp, errp, EDT_NOMEM));
+	}
 
 	bzero(dtp, sizeof (dtrace_hdl_t));
 	dtp->dt_oflags = flags;

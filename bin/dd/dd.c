@@ -14,7 +14,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -142,8 +142,6 @@ setup(void)
 		in.fd = open(in.name, O_RDONLY, 0);
 		if (in.fd == -1)
 			err(1, "%s", in.name);
-		if (caph_limit_stdin() == -1)
-			err(1, "unable to limit capability rights");
 	}
 
 	getfdtype(&in);
@@ -176,8 +174,6 @@ setup(void)
 		}
 		if (out.fd == -1)
 			err(1, "%s", out.name);
-		if (caph_limit_stdout() == -1)
-			err(1, "unable to limit capability rights");
 	}
 
 	getfdtype(&out);
@@ -187,6 +183,16 @@ setup(void)
 	if (cap_ioctls_limit(out.fd, cmds, nitems(cmds)) == -1 &&
 	    errno != ENOSYS)
 		err(1, "unable to limit capability rights");
+
+	if (in.fd != STDIN_FILENO && out.fd != STDIN_FILENO) {
+		if (caph_limit_stdin() == -1)
+			err(1, "unable to limit capability rights");
+	}
+
+	if (in.fd != STDOUT_FILENO && out.fd != STDOUT_FILENO) {
+		if (caph_limit_stdout() == -1)
+			err(1, "unable to limit capability rights");
+	}
 
 	if (in.fd != STDERR_FILENO && out.fd != STDERR_FILENO) {
 		if (caph_limit_stderr() == -1)
@@ -198,10 +204,10 @@ setup(void)
 	 * record oriented I/O, only need a single buffer.
 	 */
 	if (!(ddflags & (C_BLOCK | C_UNBLOCK))) {
-		if ((in.db = malloc(out.dbsz + in.dbsz - 1)) == NULL)
+		if ((in.db = malloc((size_t)out.dbsz + in.dbsz - 1)) == NULL)
 			err(1, "input buffer");
 		out.db = in.db;
-	} else if ((in.db = malloc(MAX(in.dbsz, cbsz) + cbsz)) == NULL ||
+	} else if ((in.db = malloc(MAX((size_t)in.dbsz, cbsz) + cbsz)) == NULL ||
 	    (out.db = malloc(out.dbsz + cbsz)) == NULL)
 		err(1, "output buffer");
 
@@ -399,7 +405,7 @@ dd_in(void)
 			++st.in_full;
 
 		/* Handle full input blocks. */
-		} else if ((size_t)n == in.dbsz) {
+		} else if ((size_t)n == (size_t)in.dbsz) {
 			in.dbcnt += in.dbrcnt = n;
 			++st.in_full;
 
@@ -556,7 +562,7 @@ dd_out(int force)
 			outp += nw;
 			st.bytes += nw;
 
-			if ((size_t)nw == n && n == out.dbsz)
+			if ((size_t)nw == n && n == (size_t)out.dbsz)
 				++st.out_full;
 			else
 				++st.out_part;

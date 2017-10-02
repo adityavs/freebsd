@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2009-2012,2016 Microsoft Corp.
+ * Copyright (c) 2009-2012,2016-2017 Microsoft Corp.
  * Copyright (c) 2010-2012 Citrix Inc.
  * Copyright (c) 2012 NetApp Inc.
  * All rights reserved.
@@ -183,6 +183,24 @@ hn_rndis_get_linkstatus(struct hn_softc *sc, uint32_t *link_status)
 		return (error);
 	if (size != sizeof(uint32_t)) {
 		if_printf(sc->hn_ifp, "invalid link status len %zu\n", size);
+		return (EINVAL);
+	}
+	return (0);
+}
+
+int
+hn_rndis_get_mtu(struct hn_softc *sc, uint32_t *mtu)
+{
+	size_t size;
+	int error;
+
+	size = sizeof(*mtu);
+	error = hn_rndis_query(sc, OID_GEN_MAXIMUM_FRAME_SIZE, NULL, 0,
+	    mtu, &size);
+	if (error)
+		return (error);
+	if (size != sizeof(uint32_t)) {
+		if_printf(sc->hn_ifp, "invalid mtu len %zu\n", size);
 		return (EINVAL);
 	}
 	return (0);
@@ -497,10 +515,12 @@ hn_rndis_query_rsscaps(struct hn_softc *sc, int *rxr_cnt0)
 		    caps.ndis_caps);
 		return (EOPNOTSUPP);
 	}
+	if (bootverbose)
+		if_printf(sc->hn_ifp, "RSS caps %#x\n", caps.ndis_caps);
 
 	/* Commit! */
 	sc->hn_rss_ind_size = indsz;
-	sc->hn_rss_hash = hash_func | hash_types;
+	sc->hn_rss_hcap = hash_func | hash_types;
 	*rxr_cnt0 = rxr_cnt;
 	return (0);
 }
@@ -841,9 +861,22 @@ hn_rndis_init(struct hn_softc *sc)
 	sc->hn_rndis_agg_pkts = comp->rm_pktmaxcnt;
 	sc->hn_rndis_agg_align = 1U << comp->rm_align;
 
+	if (sc->hn_rndis_agg_align < sizeof(uint32_t)) {
+		/*
+		 * The RNDIS packet messsage encap assumes that the RNDIS
+		 * packet message is at least 4 bytes aligned.  Fix up the
+		 * alignment here, if the remote side sets the alignment
+		 * too low.
+		 */
+		if_printf(sc->hn_ifp, "fixup RNDIS aggpkt align: %u -> %zu\n",
+		    sc->hn_rndis_agg_align, sizeof(uint32_t));
+		sc->hn_rndis_agg_align = sizeof(uint32_t);
+	}
+
 	if (bootverbose) {
-		if_printf(sc->hn_ifp, "RNDIS ver %u.%u, pktsz %u, pktcnt %u, "
-		    "align %u\n", comp->rm_ver_major, comp->rm_ver_minor,
+		if_printf(sc->hn_ifp, "RNDIS ver %u.%u, "
+		    "aggpkt size %u, aggpkt cnt %u, aggpkt align %u\n",
+		    comp->rm_ver_major, comp->rm_ver_minor,
 		    sc->hn_rndis_agg_size, sc->hn_rndis_agg_pkts,
 		    sc->hn_rndis_agg_align);
 	}
@@ -966,9 +999,11 @@ hn_rndis_query_hwcaps(struct hn_softc *sc, struct ndis_offload *caps)
 }
 
 int
-hn_rndis_attach(struct hn_softc *sc, int mtu)
+hn_rndis_attach(struct hn_softc *sc, int mtu, int *init_done)
 {
 	int error;
+
+	*init_done = 0;
 
 	/*
 	 * Initialize RNDIS.
@@ -976,6 +1011,7 @@ hn_rndis_attach(struct hn_softc *sc, int mtu)
 	error = hn_rndis_init(sc);
 	if (error)
 		return (error);
+	*init_done = 1;
 
 	/*
 	 * Configure NDIS offload settings.

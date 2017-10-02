@@ -3,18 +3,18 @@
 
 .include <src.opts.mk>
 
-.PATH: ${.CURDIR}/../ktrace
+.PATH: ${SRCTOP}/usr.bin/ktrace
 
 PROG=		kdump
 SRCS=		kdump.c subr.c
-CFLAGS+=	-I${.CURDIR}/../ktrace #-I${.CURDIR}/../...
+CFLAGS+=	-I${SRCTOP}/usr.bin/ktrace
 
 LIBADD=		sysdecode
 .if ${MK_CASPER} != "no"
 LIBADD+=	casper
 LIBADD+=	cap_grp
 LIBADD+=	cap_pwd
-CFLAGS+=-DHAVE_LIBCASPER
+CFLAGS+=-DWITH_CASPER
 .endif
 
 #NO_WERROR?=	YES

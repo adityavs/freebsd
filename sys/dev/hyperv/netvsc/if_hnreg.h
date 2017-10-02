@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2016 Microsoft Corp.
+ * Copyright (c) 2016-2017 Microsoft Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -132,6 +132,17 @@ struct hn_nvs_ndis_init {
 	uint8_t		nvs_rsvd[20];
 } __packed;
 CTASSERT(sizeof(struct hn_nvs_ndis_init) >= HN_NVS_REQSIZE_MIN);
+
+#define HN_NVS_DATAPATH_SYNTH		0
+#define HN_NVS_DATAPATH_VF		1
+
+/* No response */
+struct hn_nvs_datapath {
+	uint32_t	nvs_type;	/* HN_NVS_TYPE_SET_DATAPATH */
+	uint32_t	nvs_active_path;/* HN_NVS_DATAPATH_* */
+	uint32_t	nvs_rsvd[6];
+} __packed;
+CTASSERT(sizeof(struct hn_nvs_datapath) >= HN_NVS_REQSIZE_MIN);
 
 struct hn_nvs_rxbuf_conn {
 	uint32_t	nvs_type;	/* HN_NVS_TYPE_RXBUF_CONN */

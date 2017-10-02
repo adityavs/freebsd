@@ -51,11 +51,7 @@ __FBSDID("$FreeBSD$");
 
 /****************************** Variables ************************************/
 static const struct bhnd_device bhnd_usb_devs[] = {
-	BHND_DEVICE(BCM,	USB,	"USB1.1 Host/Device core",	NULL),
 	BHND_DEVICE(BCM,	USB20H,	"USB2.0 Host core",		NULL),
-	BHND_DEVICE(BCM,	USB20D,	"USB2.0 Device core",		NULL),
-	BHND_DEVICE(BCM,	USB11H,	"USB1.1 Host core",		NULL),
-	BHND_DEVICE(BCM,	USB11D,	"USB1.1 Device core",		NULL),
 	BHND_DEVICE_END
 };
 
@@ -162,9 +158,8 @@ bhnd_usb_attach(device_t dev)
 
 	if ( bhnd_get_device(dev) == BHND_COREID_USB20H) {
 
-		uint32_t rev;
+		uint32_t rev = bhnd_get_hwrev(dev);
 		BHND_INFO_DEV(dev, "USB HOST 2.0 setup for rev %d", rev);
-		rev = bhnd_get_hwrev(dev);
 		if (rev == 1/* ? == 2 */) {
 			/* SiBa code */
 
@@ -291,7 +286,7 @@ bhnd_usb_alloc_resource(device_t bus, device_t child, int type, int *rid,
 
 		rv = rman_reserve_resource(&sc->mem_rman, start, end, count,
 		    flags, child);
-		if (rv == 0) {
+		if (rv == NULL) {
 			BHND_ERROR_DEV(bus, "could not reserve resource");
 			return (0);
 		}
@@ -312,7 +307,7 @@ bhnd_usb_alloc_resource(device_t bus, device_t child, int type, int *rid,
 
 		rv = rman_reserve_resource(&sc->irq_rman, start, end, count,
 		    flags, child);
-		if (rv == 0) {
+		if (rv == NULL) {
 			BHND_ERROR_DEV(bus, "could not reserve resource");
 			return (0);
 		}

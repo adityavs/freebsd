@@ -74,8 +74,12 @@
  * I/O device!
  */
 
-#define	MAX_APIC_ID	0xfe
-#define	APIC_ID_ALL	0xff
+#define	xAPIC_MAX_APIC_ID	0xfe
+#define	xAPIC_ID_ALL		0xff
+#define	MAX_APIC_ID		0x200
+#define	APIC_ID_ALL		0xffffffff
+
+#define	IOAPIC_MAX_ID		xAPIC_MAX_APIC_ID
 
 /* I/O Interrupts are used for external devices such as ISA, PCI, etc. */
 #define	APIC_IO_INTS	(IDT_IO_INTS + 16)
@@ -182,7 +186,7 @@ inthand_t
 	IDTVEC(spuriousint), IDTVEC(timerint);
 
 extern vm_paddr_t lapic_paddr;
-extern int apic_cpuids[];
+extern int *apic_cpuids;
 
 void	apic_register_enumerator(struct apic_enumerator *enumerator);
 void	*ioapic_create(vm_paddr_t addr, int32_t apic_id, int intbase);
@@ -231,6 +235,9 @@ struct apic_ops {
 
 	/* CMC */
 	void	(*enable_cmc)(void);
+
+	/* AMD ELVT */
+	int	(*enable_mca_elvt)(void);
 
 	/* IPI */
 	void	(*ipi_raw)(register_t, u_int);
@@ -396,6 +403,13 @@ lapic_enable_cmc(void)
 	apic_ops.enable_cmc();
 }
 
+static inline int
+lapic_enable_mca_elvt(void)
+{
+
+	return (apic_ops.enable_mca_elvt());
+}
+
 static inline void
 lapic_ipi_raw(register_t icrlo, u_int dest)
 {
@@ -463,6 +477,8 @@ void	lapic_handle_cmc(void);
 void	lapic_handle_error(void);
 void	lapic_handle_intr(int vector, struct trapframe *frame);
 void	lapic_handle_timer(struct trapframe *frame);
+
+int	ioapic_get_rid(u_int apic_id, uint16_t *ridp);
 
 extern int x2apic_mode;
 extern int lapic_eoi_suppression;

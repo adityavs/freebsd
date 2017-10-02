@@ -36,7 +36,9 @@ __FBSDID("$FreeBSD$");
 #endif
 
 struct devsw *devsw[] = {
-	&efipart_dev,
+	&efipart_fddev,
+	&efipart_cddev,
+	&efipart_hddev,
 	&efinet_dev,
 #ifdef EFI_ZFS_BOOT
 	&zfs_dev,
@@ -67,6 +69,7 @@ extern struct console efi_console;
 #if defined(__amd64__) || defined(__i386__)
 extern struct console comconsole;
 extern struct console nullconsole;
+extern struct console spinconsole;
 #endif
 
 struct console *consoles[] = {
@@ -74,6 +77,7 @@ struct console *consoles[] = {
 #if defined(__amd64__) || defined(__i386__)
 	&comconsole,
 	&nullconsole,
+	&spinconsole,
 #endif
 	NULL
 };

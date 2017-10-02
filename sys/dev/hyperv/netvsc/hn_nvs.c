@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2009-2012,2016 Microsoft Corp.
+ * Copyright (c) 2009-2012,2016-2017 Microsoft Corp.
  * Copyright (c) 2010-2012 Citrix Inc.
  * Copyright (c) 2012 NetApp Inc.
  * All rights reserved.
@@ -43,6 +43,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/systm.h>
 #include <sys/taskqueue.h>
 
+#include <net/ethernet.h>
 #include <net/if.h>
 #include <net/if_var.h>
 #include <net/if_media.h>
@@ -272,12 +273,17 @@ hn_nvs_conn_chim(struct hn_softc *sc)
 		error = EIO;
 		goto cleanup;
 	}
-	if (sectsz == 0) {
+	if (sectsz == 0 || sectsz % sizeof(uint32_t) != 0) {
 		/*
 		 * Can't use chimney sending buffer; done!
 		 */
-		if_printf(sc->hn_ifp, "zero chimney sending buffer "
-		    "section size\n");
+		if (sectsz == 0) {
+			if_printf(sc->hn_ifp, "zero chimney sending buffer "
+			    "section size\n");
+		} else {
+			if_printf(sc->hn_ifp, "misaligned chimney sending "
+			    "buffers, section size: %u\n", sectsz);
+		}
 		sc->hn_chim_szmax = 0;
 		sc->hn_chim_cnt = 0;
 		sc->hn_flags |= HN_FLAG_CHIM_CONNECTED;
@@ -498,8 +504,10 @@ hn_nvs_conf_ndis(struct hn_softc *sc, int mtu)
 
 	memset(&conf, 0, sizeof(conf));
 	conf.nvs_type = HN_NVS_TYPE_NDIS_CONF;
-	conf.nvs_mtu = mtu;
+	conf.nvs_mtu = mtu + ETHER_HDR_LEN;
 	conf.nvs_caps = HN_NVS_NDIS_CONF_VLAN;
+	if (sc->hn_nvs_ver >= HN_NVS_VERSION_5)
+		conf.nvs_caps |= HN_NVS_NDIS_CONF_SRIOV;
 
 	/* NOTE: No response. */
 	error = hn_nvs_req_send(sc, &conf, sizeof(conf));
@@ -718,4 +726,16 @@ hn_nvs_send_rndis_ctrl(struct vmbus_channel *chan,
 
 	return hn_nvs_send_rndis_sglist(chan, HN_NVS_RNDIS_MTYPE_CTRL,
 	    sndc, gpa, gpa_cnt);
+}
+
+void
+hn_nvs_set_datapath(struct hn_softc *sc, uint32_t path)
+{
+	struct hn_nvs_datapath dp;
+
+	memset(&dp, 0, sizeof(dp));
+	dp.nvs_type = HN_NVS_TYPE_SET_DATAPATH;
+	dp.nvs_active_path = path;
+
+	hn_nvs_req_send(sc, &dp, sizeof(dp));
 }

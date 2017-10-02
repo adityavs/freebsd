@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2009-2012,2016 Microsoft Corp.
+ * Copyright (c) 2009-2012,2016-2017 Microsoft Corp.
  * Copyright (c) 2010-2012 Citrix Inc.
  * Copyright (c) 2012 NetApp Inc.
  * All rights reserved.
@@ -100,6 +100,7 @@ void		hn_nvs_sent_xact(struct hn_nvs_sendctx *sndc,
 int		hn_nvs_send_rndis_ctrl(struct vmbus_channel *chan,
 		    struct hn_nvs_sendctx *sndc, struct vmbus_gpa *gpa,
 		    int gpa_cnt);
+void		hn_nvs_set_datapath(struct hn_softc *sc, uint32_t path);
 
 extern struct hn_nvs_sendctx	hn_nvs_sendctx_none;
 

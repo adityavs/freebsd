@@ -107,7 +107,7 @@ r12a_tx_protection(struct rtwn_softc *sc, struct r12a_tx_desc *txd,
 
 	if (mode == IEEE80211_PROT_CTSONLY ||
 	    mode == IEEE80211_PROT_RTSCTS) {
-		if (ridx >= RTWN_RIDX_MCS(0))
+		if (ridx >= RTWN_RIDX_HT_MCS(0))
 			rate = rtwn_ctl_mcsrate(ic->ic_rt, ridx);
 		else
 			rate = ieee80211_ctl_rate(ic->ic_rt, ridx2rate[ridx]);
@@ -214,6 +214,17 @@ r12a_tx_set_sgi(struct rtwn_softc *sc, void *buf, struct ieee80211_node *ni)
 		txd->txdw5 |= htole32(R12A_TXDW5_DATA_SHORT);
 }
 
+static void
+r12a_tx_set_ldpc(struct rtwn_softc *sc, struct r12a_tx_desc *txd,
+    struct ieee80211_node *ni)
+{
+	struct ieee80211vap *vap = ni->ni_vap;
+
+	if ((vap->iv_flags_ht & IEEE80211_FHT_LDPC_TX) &&
+	    (ni->ni_htcap & IEEE80211_HTCAP_LDPC))
+		txd->txdw5 |= htole32(R12A_TXDW5_DATA_LDPC);
+}
+
 void
 r12a_fill_tx_desc(struct rtwn_softc *sc, struct ieee80211_node *ni,
     struct mbuf *m, void *buf, uint8_t ridx, int maxretry)
@@ -281,9 +292,10 @@ r12a_fill_tx_desc(struct rtwn_softc *sc, struct ieee80211_node *ni,
 				txd->txdw5 |= htole32(R12A_TXDW5_DATA_SHORT);
 
 			prot = IEEE80211_PROT_NONE;
-			if (ridx >= RTWN_RIDX_MCS(0)) {
+			if (ridx >= RTWN_RIDX_HT_MCS(0)) {
 				r12a_tx_set_ht40(sc, txd, ni);
 				r12a_tx_set_sgi(sc, txd, ni);
+				r12a_tx_set_ldpc(sc, txd, ni);
 				prot = ic->ic_htprotmode;
 			} else if (ic->ic_flags & IEEE80211_F_USEPROT)
 				prot = ic->ic_protmode;
@@ -326,8 +338,6 @@ r12a_fill_tx_desc(struct rtwn_softc *sc, struct ieee80211_node *ni,
 
 		if (m->m_flags & M_AMPDU_MPDU) {
 			seqno = ni->ni_txseqs[tid];
-			/* NB: clear Fragment Number field. */
-			*(uint16_t *)wh->i_seq = 0;
 			ni->ni_txseqs[tid]++;
 		} else
 			seqno = M_SEQNO_GET(m) % IEEE80211_SEQ_RANGE;

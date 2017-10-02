@@ -278,6 +278,8 @@ struct mlx4_en_tx_ring {
 	unsigned long queue_stopped;
 	unsigned long oversized_packets;
 	unsigned long wake_queue;
+	unsigned long tso_packets;
+	unsigned long defrag_attempts;
 	struct mlx4_bf bf;
 	bool bf_enabled;
 	int hwtstamp_tx_type;
@@ -572,7 +574,6 @@ struct mlx4_en_priv {
 	struct mlx4_en_port_stats port_stats;
 	struct mlx4_en_vport_stats vport_stats;
 	struct mlx4_en_vf_stats vf_stats;
-	DECLARE_BITMAP(stats_bitmap, NUM_ALL_STATS);
 	struct list_head mc_list;
 	struct list_head curr_list;
 	u64 broadcast_id;
@@ -587,7 +588,8 @@ struct mlx4_en_priv {
 	struct callout watchdog_timer;
         struct ifmedia media;
 	volatile int blocked;
-	struct sysctl_oid *sysctl;
+	struct sysctl_oid *conf_sysctl;
+	struct sysctl_oid *stat_sysctl;
 	struct sysctl_ctx_list conf_ctx;
 	struct sysctl_ctx_list stat_ctx;
 #define MLX4_EN_MAC_HASH_IDX 5
@@ -793,6 +795,8 @@ int mlx4_en_map_buffer(struct mlx4_buf *buf);
 void mlx4_en_unmap_buffer(struct mlx4_buf *buf);
 void mlx4_en_calc_rx_buf(struct net_device *dev);
 
+const u32 *mlx4_en_get_rss_key(struct mlx4_en_priv *priv, u16 *keylen);
+u8 mlx4_en_get_rss_mask(struct mlx4_en_priv *priv);
 int mlx4_en_config_rss_steer(struct mlx4_en_priv *priv);
 void mlx4_en_release_rss_steer(struct mlx4_en_priv *priv);
 int mlx4_en_create_drop_qp(struct mlx4_en_priv *priv);

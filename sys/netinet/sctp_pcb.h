@@ -314,10 +314,6 @@ struct sctp_pcb {
 	 */
 	struct sctp_timer signature_change;
 
-	/* Zero copy full buffer timer */
-	struct sctp_timer zero_copy_timer;
-	/* Zero copy app to transport (sendq) read repulse timer */
-	struct sctp_timer zero_copy_sendq_timer;
 	uint32_t def_cookie_life;
 	/* defaults to 0 */
 	int auto_close_time;
@@ -379,8 +375,10 @@ struct sctp_inpcb {
 
 	/* list of addrs in use by the EP, NULL if bound-all */
 	struct sctpladdr sctp_addr_list;
-	/* used for source address selection rotation when we are subset
-	 * bound */
+	/*
+	 * used for source address selection rotation when we are subset
+	 * bound
+	 */
 	struct sctp_laddr *next_addr_touse;
 
 	/* back pointer to our socket */

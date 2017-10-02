@@ -546,7 +546,8 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 #endif
 
 	/* receive buffer autosize */
-	CURVNET_SET(so->so_vnet);
+	MPASS(toep->vnet == so->so_vnet);
+	CURVNET_SET(toep->vnet);
 	SOCKBUF_LOCK(sb);
 	if (sb->sb_flags & SB_AUTOSIZE &&
 	    V_tcp_do_autorcvbuf &&
@@ -1276,7 +1277,8 @@ pscmp(struct pageset *ps, struct vmspace *vm, vm_offset_t start, int npages,
     int pgoff, int len)
 {
 
-	if (ps->npages != npages || ps->offset != pgoff || ps->len != len)
+	if (ps->start != start || ps->npages != npages ||
+	    ps->offset != pgoff || ps->len != len)
 		return (1);
 
 	return (ps->vm != vm || ps->vm_timestamp != vm->vm_map.timestamp);
@@ -1377,6 +1379,7 @@ hold_aio(struct toepcb *toep, struct kaiocb *job, struct pageset **pps)
 	ps->len = job->uaiocb.aio_nbytes;
 	atomic_add_int(&vm->vm_refcnt, 1);
 	ps->vm = vm;
+	ps->start = start;
 
 	CTR5(KTR_CXGBE, "%s: tid %d, new pageset %p for job %p, npages %d",
 	    __func__, toep->tid, ps, job, ps->npages);

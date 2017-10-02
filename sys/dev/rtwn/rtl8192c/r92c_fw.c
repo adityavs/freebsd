@@ -80,7 +80,7 @@ r92c_fw_cmd(struct rtwn_softc *sc, uint8_t id, const void *buf, int len)
 	}
 
 	/* Wait for current FW box to be empty. */
-	for (ntries = 0; ntries < 50; ntries++) {
+	for (ntries = 0; ntries < 100; ntries++) {
 		if (!(rtwn_read_1(sc, R92C_HMETFR) & (1 << sc->fwcur)))
 			break;
 		rtwn_delay(sc, 2000);
@@ -198,7 +198,7 @@ r92c_send_ra_cmd(struct rtwn_softc *sc, int macid, uint32_t rates,
 #endif
 
 	/* Set rates mask for unicast frames. */
-	if (maxrate >= RTWN_RIDX_MCS(0))
+	if (maxrate >= RTWN_RIDX_HT_MCS(0))
 		mode = R92C_RAID_11GN;
 	else if (maxrate >= RTWN_RIDX_OFDM6)
 		mode = R92C_RAID_11BG;

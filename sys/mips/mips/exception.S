@@ -14,7 +14,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -1019,6 +1019,8 @@ tlb_insert_random:
 	 * of this handler. Otherwise the ddb backtrace code will think that
 	 * the panic() was called from MipsTLBMissException.
 	 */
+	.globl	MipsKStackOverflow
+MipsKStackOverflow:
 	nop
 
 	.set pop
@@ -1100,6 +1102,8 @@ END(MipsTLBMissException)
  *----------------------------------------------------------------------------
  */
 NESTED(MipsFPTrap, CALLFRAME_SIZ, ra)
+	.set push
+	.set hardfloat
 	PTR_SUBU	sp, sp, CALLFRAME_SIZ
 	mfc0	t0, MIPS_COP_0_STATUS
 	HAZARD_DELAY
@@ -1199,6 +1203,7 @@ FPReturn:
 	ITLBNOPFIX
 	j	ra
 	PTR_ADDU sp, sp, CALLFRAME_SIZ
+	.set pop
 END(MipsFPTrap)
 
 #ifndef INTRNG

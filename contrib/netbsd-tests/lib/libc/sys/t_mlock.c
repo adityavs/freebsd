@@ -32,7 +32,7 @@
 __RCSID("$NetBSD: t_mlock.c,v 1.6 2016/08/09 12:02:44 kre Exp $");
 
 #ifdef __FreeBSD__
-#include <sys/types.h>
+#include <sys/param.h> /* NetBSD requires sys/param.h for sysctl(3), unlike FreeBSD */
 #endif
 #include <sys/mman.h>
 #include <sys/resource.h>
@@ -103,7 +103,7 @@ ATF_TC_BODY(mlock_err, tc)
 	unsigned long vmin = 0;
 	size_t len = sizeof(vmin);
 #endif
-#if !defined(__aarch64__) && !defined(__riscv__)
+#if !defined(__aarch64__) && !defined(__riscv)
 	void *invalid_ptr;
 #endif
 	int null_errno = ENOMEM;	/* error expected for NULL */
@@ -155,7 +155,7 @@ ATF_TC_BODY(mlock_err, tc)
 	ATF_REQUIRE_ERRNO(ENOMEM, munlock(buf, page) == -1);
 
 /* There is no sbrk on AArch64 and RISC-V */
-#if !defined(__aarch64__) && !defined(__riscv__)
+#if !defined(__aarch64__) && !defined(__riscv)
 	/*
 	 * These are permitted to fail (EINVAL) but do not on NetBSD
 	 */

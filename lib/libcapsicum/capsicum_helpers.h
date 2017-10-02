@@ -31,6 +31,7 @@
 
 #include <sys/param.h>
 #include <sys/capsicum.h>
+#include <sys/ioctl.h>
 
 #include <errno.h>
 #include <nl_types.h>
@@ -41,19 +42,22 @@
 #define	CAPH_IGNORE_EBADF	0x0001
 #define	CAPH_READ		0x0002
 #define	CAPH_WRITE		0x0004
+#define	CAPH_LOOKUP		0x0008
 
 static __inline int
 caph_limit_stream(int fd, int flags)
 {
 	cap_rights_t rights;
-	unsigned long cmds[] = { TIOCGETA, TIOCGWINSZ };
+	unsigned long cmds[] = { TIOCGETA, TIOCGWINSZ, FIODTYPE };
 
-	cap_rights_init(&rights, CAP_FCNTL, CAP_FSTAT, CAP_IOCTL);
+	cap_rights_init(&rights, CAP_FCNTL, CAP_FSTAT, CAP_IOCTL, CAP_SEEK);
 
 	if ((flags & CAPH_READ) != 0)
 		cap_rights_set(&rights, CAP_READ);
 	if ((flags & CAPH_WRITE) != 0)
 		cap_rights_set(&rights, CAP_WRITE);
+	if ((flags & CAPH_LOOKUP) != 0)
+		cap_rights_set(&rights, CAP_LOOKUP);
 
 	if (cap_rights_limit(fd, &rights) < 0 && errno != ENOSYS) {
 		if (errno == EBADF && (flags & CAPH_IGNORE_EBADF) != 0)
