@@ -279,12 +279,7 @@ exec_setregs(struct thread *td, struct image_params *imgp, u_long stack)
 
 	memset(tf, 0, sizeof(struct trapframe));
 
-	/*
-	 * We need to set a0 for init as it doesn't call
-	 * cpu_set_syscall_retval to copy the value. We also
-	 * need to set td_retval for the cases where we do.
-	 */
-	tf->tf_a[0] = td->td_retval[0] = stack;
+	tf->tf_a[0] = stack;
 	tf->tf_sp = STACKALIGN(stack);
 	tf->tf_ra = imgp->entry_addr;
 	tf->tf_sepc = imgp->entry_addr;
@@ -553,7 +548,6 @@ sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 	struct thread *td;
 	struct proc *p;
 	int onstack;
-	int code;
 	int sig;
 
 	td = curthread;
@@ -561,7 +555,6 @@ sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 	PROC_LOCK_ASSERT(p, MA_OWNED);
 
 	sig = ksi->ksi_signo;
-	code = ksi->ksi_code;
 	psp = p->p_sigacts;
 	mtx_assert(&psp->ps_mtx, MA_OWNED);
 
@@ -876,8 +869,6 @@ initriscv(struct riscv_bootparams *rvbp)
 	mutex_init();
 	init_param2(physmem);
 	kdb_init();
-
-	riscv_init_interrupts();
 
 	early_boot = 0;
 }

@@ -1,4 +1,6 @@
 /*-
+ * SPDX-License-Identifier: BSD-2-Clause-FreeBSD
+ *
  * Copyright (c) 2012 Chelsio Communications, Inc.
  * All rights reserved.
  *
@@ -255,7 +257,6 @@ do_l2t_write_rpl(struct sge_iq *iq, const struct rss_header *rss,
 	return (0);
 }
 
-#ifdef SBUF_DRAIN
 static inline unsigned int
 vlan_prio(const struct l2t_entry *e)
 {
@@ -333,4 +334,3 @@ skip:
 
 	return (rc);
 }
-#endif

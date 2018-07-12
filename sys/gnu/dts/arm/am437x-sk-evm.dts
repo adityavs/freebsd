@@ -35,7 +35,7 @@
 		clock-frequency = <32768>;
 	};
 
-	backlight {
+	lcd_bl: backlight {
 		compatible = "pwm-backlight";
 		pwms = <&ecap0 0 50000 PWM_POLARITY_INVERTED>;
 		brightness-levels = <0 51 53 56 62 75 101 152 255>;
@@ -131,6 +131,8 @@
 
 		pinctrl-names = "default";
 		pinctrl-0 = <&lcd_pins>;
+
+		backlight = <&lcd_bl>;
 
 		enable-gpios = <&gpio1 7 GPIO_ACTIVE_HIGH>;
 
@@ -451,8 +453,6 @@
 
 		dcdc3: regulator-dcdc3 {
 			regulator-name = "vdds_ddr";
-			regulator-min-microvolt = <1500000>;
-			regulator-max-microvolt = <1500000>;
 			regulator-boot-on;
 			regulator-always-on;
 			regulator-state-mem {
@@ -511,7 +511,7 @@
 	};
 
 	at24@50 {
-		compatible = "at24,24c256";
+		compatible = "atmel,24c256";
 		pagesize = <64>;
 		reg = <0x50>;
 	};
@@ -600,7 +600,7 @@
 };
 
 &usb1 {
-	dr_mode = "peripheral";
+	dr_mode = "otg";
 	status = "okay";
 	pinctrl-names = "default";
 	pinctrl-0 = <&usb1_pins>;

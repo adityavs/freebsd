@@ -1,4 +1,6 @@
 /*-
+ * SPDX-License-Identifier: BSD-3-Clause
+ *
  * Copyright (c) 2013 Johann 'Myrkraverk' Oskarsson.
  * Copyright (c) 1992 Diomidis Spinellis.
  * Copyright (c) 1992, 1993
@@ -248,6 +250,8 @@ again:
 			s = script->s;
 			state = ST_STRING;
 			goto again;
+		default:
+			__unreachable();
 		}
 	case ST_FILE:
 		if ((p = fgets(buf, n, f)) != NULL) {

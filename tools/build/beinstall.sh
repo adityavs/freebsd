@@ -101,12 +101,19 @@ trap 'errx "Interrupt caught"' HUP INT TERM
 objdir=$(make -V .OBJDIR 2>/dev/null)
 [ ! -d "${objdir}" ] && errx "Must have built FreeBSD from source tree"
 
-if [ -d .git ] ; then
+# May be a worktree, in which case .git is a file, not a directory.
+if [ -e .git ] ; then
     commit_time=$(git show --format='%ct' 2>/dev/null | head -1)
     [ $? -ne 0 ] && errx "Can't lookup git commit timestamp"
     commit_ts=$(date -r ${commit_time} '+%Y%m%d.%H%M%S')
 elif [ -d .svn ] ; then
-    commit_ts=$( svn info | awk '/Last Changed Date/ {print $4 "." $5}' | tr -d :- )
+    if [ -f /usr/bin/svnlite ]; then
+        commit_ts=$( svnlite info --show-item last-changed-date | sed -e 's/\..*//' -e 's/T/./' -e 's/-//g' -e s'/://g' )
+    elif [ -f /usr/local/bin/svn ]; then
+        commit_ts=$( svn info --show-item last-changed-date | sed -e 's/\..*//' -e 's/T/./' -e 's/-//g' -e s'/://g' )
+    else
+        errx "Can't lookup Subversion commit timestamp"
+    fi
     [ $? -ne 0 ] && errx "Can't lookup Subversion commit timestamp"
 else
     errx "Unable to determine sandbox type"

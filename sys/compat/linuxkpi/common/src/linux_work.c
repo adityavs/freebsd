@@ -55,6 +55,7 @@ static struct workqueue_struct *linux_system_long_wq;
 struct workqueue_struct *system_wq;
 struct workqueue_struct *system_long_wq;
 struct workqueue_struct *system_unbound_wq;
+struct workqueue_struct *system_highpri_wq;
 struct workqueue_struct *system_power_efficient_wq;
 
 static int linux_default_wq_cpus = 4;
@@ -260,6 +261,23 @@ done:
 	WQ_EXEC_UNLOCK(wq);
 }
 
+void
+linux_delayed_work_fn(void *context, int pending)
+{
+	struct delayed_work *dwork = context;
+
+	/*
+	 * Make sure the timer belonging to the delayed work gets
+	 * drained before invoking the work function. Else the timer
+	 * mutex may still be in use which can lead to use-after-free
+	 * situations, because the work function might free the work
+	 * structure before returning.
+	 */
+	callout_drain(&dwork->timer.callout);
+
+	linux_work_fn(&dwork->work, pending);
+}
+
 static void
 linux_delayed_work_timer_fn(void *arg)
 {
@@ -437,6 +455,7 @@ bool
 linux_flush_work(struct work_struct *work)
 {
 	struct taskqueue *tq;
+	int retval;
 
 	WITNESS_WARN(WARN_GIANTOK | WARN_SLEEPOK, NULL,
 	    "linux_flush_work() might sleep");
@@ -446,8 +465,9 @@ linux_flush_work(struct work_struct *work)
 		return (0);
 	default:
 		tq = work->work_queue->taskqueue;
+		retval = taskqueue_poll_is_busy(tq, &work->work_task);
 		taskqueue_drain(tq, &work->work_task);
-		return (1);
+		return (retval);
 	}
 }
 
@@ -460,6 +480,7 @@ bool
 linux_flush_delayed_work(struct delayed_work *dwork)
 {
 	struct taskqueue *tq;
+	int retval;
 
 	WITNESS_WARN(WARN_GIANTOK | WARN_SLEEPOK, NULL,
 	    "linux_flush_delayed_work() might sleep");
@@ -473,8 +494,9 @@ linux_flush_delayed_work(struct delayed_work *dwork)
 		/* FALLTHROUGH */
 	default:
 		tq = dwork->work.work_queue->taskqueue;
+		retval = taskqueue_poll_is_busy(tq, &dwork->work.work_task);
 		taskqueue_drain(tq, &dwork->work.work_task);
-		return (1);
+		return (retval);
 	}
 }
 
@@ -550,7 +572,8 @@ void
 linux_init_delayed_work(struct delayed_work *dwork, work_func_t func)
 {
 	memset(dwork, 0, sizeof(*dwork));
-	INIT_WORK(&dwork->work, func);
+	dwork->work.func = func;
+	TASK_INIT(&dwork->work.work_task, 0, linux_delayed_work_fn, dwork);
 	mtx_init(&dwork->timer.mtx, spin_lock_name("lkpi-dwork"), NULL,
 	    MTX_DEF | MTX_NOWITNESS);
 	callout_init_mtx(&dwork->timer.callout, &dwork->timer.mtx, 0);
@@ -576,6 +599,7 @@ linux_work_init(void *arg)
 	system_wq = linux_system_short_wq;
 	system_power_efficient_wq = linux_system_short_wq;
 	system_unbound_wq = linux_system_short_wq;
+	system_highpri_wq = linux_system_short_wq;
 }
 SYSINIT(linux_work_init, SI_SUB_TASKQ, SI_ORDER_THIRD, linux_work_init, NULL);
 
@@ -590,5 +614,6 @@ linux_work_uninit(void *arg)
 	system_wq = NULL;
 	system_power_efficient_wq = NULL;
 	system_unbound_wq = NULL;
+	system_highpri_wq = NULL;
 }
 SYSUNINIT(linux_work_uninit, SI_SUB_TASKQ, SI_ORDER_THIRD, linux_work_uninit, NULL);

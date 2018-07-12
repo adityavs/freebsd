@@ -106,6 +106,8 @@ struct pv_chunk {
 
 typedef struct pmap *pmap_t;
 
+struct thread;
+
 #ifdef _KERNEL
 extern struct pmap	kernel_pmap_store;
 #define	kernel_pmap	(&kernel_pmap_store)
@@ -138,10 +140,12 @@ extern vm_offset_t virtual_end;
 	((((va) | (pa)) & L1_OFFSET) == 0 && (size) >= L1_SIZE)
 
 void	pmap_bootstrap(vm_offset_t, vm_offset_t, vm_paddr_t, vm_size_t);
+void	pmap_kenter(vm_offset_t sva, vm_size_t size, vm_paddr_t pa, int mode);
 void	pmap_kenter_device(vm_offset_t, vm_size_t, vm_paddr_t);
 vm_paddr_t pmap_kextract(vm_offset_t va);
 void	pmap_kremove(vm_offset_t);
 void	pmap_kremove_device(vm_offset_t, vm_size_t);
+void	*pmap_mapdev_attr(vm_offset_t pa, vm_size_t size, vm_memattr_t ma);
 
 void	*pmap_mapdev(vm_offset_t, vm_size_t);
 void	*pmap_mapbios(vm_paddr_t, vm_size_t);
@@ -155,6 +159,8 @@ bool	pmap_get_tables(pmap_t, vm_offset_t, pd_entry_t **, pd_entry_t **,
     pd_entry_t **, pt_entry_t **);
 
 int	pmap_fault(pmap_t, uint64_t, uint64_t);
+
+struct pcb *pmap_switch(struct thread *, struct thread *);
 
 #define	pmap_page_is_mapped(m)	(!TAILQ_EMPTY(&(m)->md.pv_list))
 

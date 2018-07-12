@@ -1,4 +1,6 @@
 /*
+ * SPDX-License-Identifier: BSD-3-Clause
+ *
  * Copyright (c) 1999-2009 Apple Inc.
  * Copyright (c) 2016-2017 Robert N. M. Watson
  * All rights reserved.
@@ -425,7 +427,6 @@ audit_sys_auditon(struct audit_record *ar, struct au_record *rec)
 		break;
 
 	case A_SETCLASS:
-		kau_write(rec, tok);
 		tok = au_to_arg32(2, "setclass:ec_event",
 		    ar->ar_arg_auditon.au_evclass.ec_number);
 		kau_write(rec, tok);

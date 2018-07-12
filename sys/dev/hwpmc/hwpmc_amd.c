@@ -1,4 +1,6 @@
 /*-
+ * SPDX-License-Identifier: BSD-2-Clause-FreeBSD
+ *
  * Copyright (c) 2003-2008 Joseph Koshy
  * Copyright (c) 2007 The FreeBSD Foundation
  * All rights reserved.
@@ -108,7 +110,7 @@ static  struct amd_descr amd_pmcdesc[AMD_NPMCS] =
 
 struct amd_event_code_map {
 	enum pmc_event	pe_ev;	 /* enum value */
-	uint8_t		pe_code; /* encoded event mask */
+	uint16_t	pe_code; /* encoded event mask */
 	uint8_t		pe_mask; /* bits allowed in unit mask */
 };
 
@@ -625,14 +627,15 @@ amd_stop_pmc(int cpu, int ri)
  */
 
 static int
-amd_intr(int cpu, struct trapframe *tf)
+amd_intr(struct trapframe *tf)
 {
-	int i, error, retval;
+	int i, error, retval, cpu;
 	uint32_t config, evsel, perfctr;
 	struct pmc *pm;
 	struct amd_cpu *pac;
 	pmc_value_t v;
 
+	cpu = curcpu;
 	KASSERT(cpu >= 0 && cpu < pmc_cpu_max(),
 	    ("[amd,%d] out of range CPU %d", __LINE__, cpu));
 
@@ -686,14 +689,15 @@ amd_intr(int cpu, struct trapframe *tf)
 		wrmsr(perfctr, AMD_RELOAD_COUNT_TO_PERFCTR_VALUE(v));
 
 		/* Restart the counter if logging succeeded. */
-		error = pmc_process_interrupt(cpu, PMC_HR, pm, tf,
-		    TRAPF_USERMODE(tf));
+		error = pmc_process_interrupt(PMC_HR, pm, tf);
 		if (error == 0)
 			wrmsr(evsel, config);
 	}
 
-	atomic_add_int(retval ? &pmc_stats.pm_intr_processed :
-	    &pmc_stats.pm_intr_ignored, 1);
+	if (retval)
+		counter_u64_add(pmc_stats.pm_intr_processed, 1);
+	else
+		counter_u64_add(pmc_stats.pm_intr_ignored, 1);
 
 	PMCDBG1(MDP,INT,2, "retval=%d", retval);
 	return (retval);

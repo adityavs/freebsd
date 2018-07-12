@@ -1,4 +1,6 @@
 /*-
+ * SPDX-License-Identifier: BSD-2-Clause-FreeBSD
+ *
  * Copyright (c) 2005 Philip Paeps <philip@FreeBSD.org>
  * All rights reserved.
  *
@@ -41,6 +43,7 @@
 #include <syslog.h>
 #include <unistd.h>
 
+#define	SNMPTREE_TYPES
 #include "pf_oid.h"
 #include "pf_tree.h"
 

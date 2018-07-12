@@ -1,4 +1,6 @@
 /*-
+ * SPDX-License-Identifier: BSD-2-Clause-FreeBSD AND BSD-2-Clause
+ *
  * Copyright (c) 2011 NetApp, Inc.
  * All rights reserved.
  *
@@ -363,7 +365,7 @@ cb_setreg(void *arg, int r, uint64_t v)
 {
 	int error;
 	enum vm_reg_name vmreg;
-	
+
 	vmreg = VM_REG_LAST;
 
 	switch (r) {
@@ -511,14 +513,14 @@ cb_getmem(void *arg, uint64_t *ret_lowmem, uint64_t *ret_highmem)
 }
 
 struct env {
-	const char *str;	/* name=value */
+	char *str;	/* name=value */
 	SLIST_ENTRY(env) next;
 };
 
 static SLIST_HEAD(envhead, env) envhead;
 
 static void
-addenv(const char *str)
+addenv(char *str)
 {
 	struct env *env;
 
@@ -527,7 +529,7 @@ addenv(const char *str)
 	SLIST_INSERT_HEAD(&envhead, env, next);
 }
 
-static const char *
+static char *
 cb_getenv(void *arg, int num)
 {
 	int i;

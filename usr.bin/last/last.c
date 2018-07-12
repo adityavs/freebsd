@@ -1,4 +1,6 @@
 /*
+ * SPDX-License-Identifier: BSD-3-Clause
+ *
  * Copyright (c) 1987, 1993, 1994
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -188,7 +190,7 @@ main(int argc, char *argv[])
 	if (setutxdb(UTXDB_LOG, file) != 0)
 		err(1, "%s", file != NULL ? file : "(default utx db)");
 
-	if (cap_enter() < 0 && errno != ENOSYS)
+	if (caph_enter() < 0)
 		err(1, "cap_enter");
 
 	if (sflag && width == 8) usage();

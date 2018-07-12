@@ -1,4 +1,6 @@
 /*-
+ * SPDX-License-Identifier: ISC
+ *
  * Copyright (c) 2003 Mike Frantzen <frantzen@w4g.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
@@ -25,7 +27,6 @@ __FBSDID("$FreeBSD$");
 #include <sys/kernel.h>
 #include <sys/lock.h>
 #include <sys/mbuf.h>
-#include <sys/rwlock.h>
 #include <sys/socket.h>
 
 #include <netinet/in.h>

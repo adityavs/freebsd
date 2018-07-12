@@ -1,4 +1,6 @@
 /*-
+ * Copyright (c) 2017 Oliver Pinter
+ * Copyright (c) 2017 W. Dean Freeman
  * Copyright (c) 2000-2015 Mark R V Murray
  * Copyright (c) 2013 Arthur Mesh
  * Copyright (c) 2004 Robert N. M. Watson
@@ -78,6 +80,12 @@ static struct sysctl_ctx_list random_clist;
 /* 1 to let the kernel thread run, 0 to terminate, -1 to mark completion */
 volatile int random_kthread_control;
 
+
+/* Allow the sysadmin to select the broad category of
+ * entropy types to harvest.
+ */
+__read_frequently u_int hc_source_mask;
+
 /*
  * Put all the harvest queue context stuff in one place.
  * this make is a bit easier to lock and protect.
@@ -91,10 +99,6 @@ static struct harvest_context {
 	u_int hc_destination[ENTROPYSOURCE];
 	/* The context of the kernel thread processing harvested entropy */
 	struct proc *hc_kthread_proc;
-	/* Allow the sysadmin to select the broad category of
-	 * entropy types to harvest.
-	 */
-	u_int hc_source_mask;
 	/*
 	 * Lockless ring buffer holding entropy events
 	 * If ring.in == ring.out,
@@ -240,7 +244,27 @@ read_rate_increment(u_int chunk)
 }
 
 /* ARGSUSED */
-RANDOM_CHECK_UINT(harvestmask, 0, RANDOM_HARVEST_EVERYTHING_MASK);
+static int
+random_check_uint_harvestmask(SYSCTL_HANDLER_ARGS)
+{
+	int error;
+	u_int value, orig_value;
+
+	orig_value = value = hc_source_mask;
+	error = sysctl_handle_int(oidp, &value, 0, req);
+	if (error != 0 || req->newptr == NULL)
+		return (error);
+
+	if (flsl(value) > ENTROPYSOURCE)
+		return (EINVAL);
+
+	/*
+	 * Disallow userspace modification of pure entropy sources.
+	 */
+	hc_source_mask = (value & ~RANDOM_HARVEST_PURE_MASK) |
+	    (orig_value & RANDOM_HARVEST_PURE_MASK);
+	return (0);
+}
 
 /* ARGSUSED */
 static int
@@ -252,34 +276,37 @@ random_print_harvestmask(SYSCTL_HANDLER_ARGS)
 	error = sysctl_wire_old_buffer(req, 0);
 	if (error == 0) {
 		sbuf_new_for_sysctl(&sbuf, NULL, 128, req);
-		for (i = RANDOM_ENVIRONMENTAL_END; i >= 0; i--)
-			sbuf_cat(&sbuf, (harvest_context.hc_source_mask & (1 << i)) ? "1" : "0");
+		for (i = ENTROPYSOURCE - 1; i >= 0; i--)
+			sbuf_cat(&sbuf, (hc_source_mask & (1 << i)) ? "1" : "0");
 		error = sbuf_finish(&sbuf);
 		sbuf_delete(&sbuf);
 	}
 	return (error);
 }
 
-static const char *(random_source_descr[]) = {
-	"CACHED",
-	"ATTACH",
-	"KEYBOARD",
-	"MOUSE",
-	"NET_TUN",
-	"NET_ETHER",
-	"NET_NG",
-	"INTERRUPT",
-	"SWI",
-	"FS_ATIME",
-	"UMA", /* ENVIRONMENTAL_END */
-	"PURE_OCTEON",
-	"PURE_SAFE",
-	"PURE_GLXSB",
-	"PURE_UBSEC",
-	"PURE_HIFN",
-	"PURE_RDRAND",
-	"PURE_NEHEMIAH",
-	"PURE_RNDTEST",
+static const char *random_source_descr[ENTROPYSOURCE] = {
+	[RANDOM_CACHED] = "CACHED",
+	[RANDOM_ATTACH] = "ATTACH",
+	[RANDOM_KEYBOARD] = "KEYBOARD",
+	[RANDOM_MOUSE] = "MOUSE",
+	[RANDOM_NET_TUN] = "NET_TUN",
+	[RANDOM_NET_ETHER] = "NET_ETHER",
+	[RANDOM_NET_NG] = "NET_NG",
+	[RANDOM_INTERRUPT] = "INTERRUPT",
+	[RANDOM_SWI] = "SWI",
+	[RANDOM_FS_ATIME] = "FS_ATIME",
+	[RANDOM_UMA] = "UMA", /* ENVIRONMENTAL_END */
+	[RANDOM_PURE_OCTEON] = "PURE_OCTEON", /* PURE_START */
+	[RANDOM_PURE_SAFE] = "PURE_SAFE",
+	[RANDOM_PURE_GLXSB] = "PURE_GLXSB",
+	[RANDOM_PURE_UBSEC] = "PURE_UBSEC",
+	[RANDOM_PURE_HIFN] = "PURE_HIFN",
+	[RANDOM_PURE_RDRAND] = "PURE_RDRAND",
+	[RANDOM_PURE_NEHEMIAH] = "PURE_NEHEMIAH",
+	[RANDOM_PURE_RNDTEST] = "PURE_RNDTEST",
+	[RANDOM_PURE_VIRTIO] = "PURE_VIRTIO",
+	[RANDOM_PURE_BROADCOM] = "PURE_BROADCOM",
+	[RANDOM_PURE_CCP] = "PURE_CCP",
 	/* "ENTROPYSOURCE" */
 };
 
@@ -289,15 +316,22 @@ random_print_harvestmask_symbolic(SYSCTL_HANDLER_ARGS)
 {
 	struct sbuf sbuf;
 	int error, i;
+	bool first;
 
+	first = true;
 	error = sysctl_wire_old_buffer(req, 0);
 	if (error == 0) {
 		sbuf_new_for_sysctl(&sbuf, NULL, 128, req);
-		for (i = RANDOM_ENVIRONMENTAL_END; i >= 0; i--) {
-			sbuf_cat(&sbuf, (i == RANDOM_ENVIRONMENTAL_END) ? "" : ",");
-			sbuf_cat(&sbuf, !(harvest_context.hc_source_mask & (1 << i)) ? "[" : "");
+		for (i = ENTROPYSOURCE - 1; i >= 0; i--) {
+			if (i >= RANDOM_PURE_START &&
+			    (hc_source_mask & (1 << i)) == 0)
+				continue;
+			if (!first)
+				sbuf_cat(&sbuf, ",");
+			sbuf_cat(&sbuf, !(hc_source_mask & (1 << i)) ? "[" : "");
 			sbuf_cat(&sbuf, random_source_descr[i]);
-			sbuf_cat(&sbuf, !(harvest_context.hc_source_mask & (1 << i)) ? "]" : "");
+			sbuf_cat(&sbuf, !(hc_source_mask & (1 << i)) ? "]" : "");
+			first = false;
 		}
 		error = sbuf_finish(&sbuf);
 		sbuf_delete(&sbuf);
@@ -315,12 +349,11 @@ random_harvestq_init(void *unused __unused)
 	    SYSCTL_STATIC_CHILDREN(_kern_random),
 	    OID_AUTO, "harvest", CTLFLAG_RW, 0,
 	    "Entropy Device Parameters");
-	harvest_context.hc_source_mask = RANDOM_HARVEST_EVERYTHING_MASK;
+	hc_source_mask = RANDOM_HARVEST_EVERYTHING_MASK;
 	SYSCTL_ADD_PROC(&random_clist,
 	    SYSCTL_CHILDREN(random_sys_o),
 	    OID_AUTO, "mask", CTLTYPE_UINT | CTLFLAG_RW,
-	    &harvest_context.hc_source_mask, 0,
-	    random_check_uint_harvestmask, "IU",
+	    NULL, 0, random_check_uint_harvestmask, "IU",
 	    "Entropy harvesting mask");
 	SYSCTL_ADD_PROC(&random_clist,
 	    SYSCTL_CHILDREN(random_sys_o),
@@ -417,14 +450,13 @@ SYSUNINIT(random_device_h_init, SI_SUB_RANDOM, SI_ORDER_SECOND, random_harvestq_
  * read which can be quite expensive.
  */
 void
-random_harvest_queue(const void *entropy, u_int size, u_int bits, enum random_entropy_source origin)
+random_harvest_queue_(const void *entropy, u_int size, u_int bits,
+	enum random_entropy_source origin)
 {
 	struct harvest_event *event;
 	u_int ring_in;
 
 	KASSERT(origin >= RANDOM_START && origin < ENTROPYSOURCE, ("%s: origin %d invalid\n", __func__, origin));
-	if (!(harvest_context.hc_source_mask & (1 << origin)))
-		return;
 	RANDOM_HARVEST_LOCK();
 	ring_in = (harvest_context.hc_entropy_ring.in + 1)%RANDOM_RING_MAX;
 	if (ring_in != harvest_context.hc_entropy_ring.out) {
@@ -455,14 +487,10 @@ random_harvest_queue(const void *entropy, u_int size, u_int bits, enum random_en
  * This is the right place for high-rate harvested data.
  */
 void
-random_harvest_fast(const void *entropy, u_int size, u_int bits, enum random_entropy_source origin)
+random_harvest_fast_(const void *entropy, u_int size, u_int bits)
 {
 	u_int pos;
 
-	KASSERT(origin >= RANDOM_START && origin < ENTROPYSOURCE, ("%s: origin %d invalid\n", __func__, origin));
-	/* XXX: FIX!! The above KASSERT is BS. Right now we ignore most structure and just accumulate the supplied data */
-	if (!(harvest_context.hc_source_mask & (1 << origin)))
-		return;
 	pos = harvest_context.hc_entropy_fast_accumulator.pos;
 	harvest_context.hc_entropy_fast_accumulator.buf[pos] ^= jenkins_hash(entropy, size, (uint32_t)get_cyclecount());
 	harvest_context.hc_entropy_fast_accumulator.pos = (pos + 1)%RANDOM_ACCUM_MAX;
@@ -475,13 +503,11 @@ random_harvest_fast(const void *entropy, u_int size, u_int bits, enum random_ent
  * (e.g.) booting when initial entropy is being gathered.
  */
 void
-random_harvest_direct(const void *entropy, u_int size, u_int bits, enum random_entropy_source origin)
+random_harvest_direct_(const void *entropy, u_int size, u_int bits, enum random_entropy_source origin)
 {
 	struct harvest_event event;
 
 	KASSERT(origin >= RANDOM_START && origin < ENTROPYSOURCE, ("%s: origin %d invalid\n", __func__, origin));
-	if (!(harvest_context.hc_source_mask & (1 << origin)))
-		return;
 	size = MIN(size, sizeof(event.he_entropy));
 	event.he_somecounter = (uint32_t)get_cyclecount();
 	event.he_size = size;
@@ -491,6 +517,20 @@ random_harvest_direct(const void *entropy, u_int size, u_int bits, enum random_e
 	memcpy(event.he_entropy, entropy, size);
 	random_harvestq_fast_process_event(&event);
 	explicit_bzero(&event, sizeof(event));
+}
+
+void
+random_harvest_register_source(enum random_entropy_source source)
+{
+
+	hc_source_mask |= (1 << source);
+}
+
+void
+random_harvest_deregister_source(enum random_entropy_source source)
+{
+
+	hc_source_mask &= ~(1 << source);
 }
 
 MODULE_VERSION(random_harvestq, 1);

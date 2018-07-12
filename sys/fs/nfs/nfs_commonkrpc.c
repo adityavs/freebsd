@@ -1,4 +1,6 @@
 /*-
+ * SPDX-License-Identifier: BSD-3-Clause
+ *
  * Copyright (c) 1989, 1991, 1993, 1995
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -155,6 +157,9 @@ static int nfsv2_procid[NFS_V3NPROCS] = {
 /*
  * Initialize sockets and congestion for a new NFS connection.
  * We do not free the sockaddr if error.
+ * Which arguments are set to NULL indicate what kind of call it is.
+ * cred == NULL --> a call to connect to a pNFS DS
+ * nmp == NULL --> indicates an upcall to userland or a NFSv4.0 callback
  */
 int
 newnfs_connect(struct nfsmount *nmp, struct nfssockreq *nrp,
@@ -291,24 +296,38 @@ newnfs_connect(struct nfsmount *nmp, struct nfssockreq *nrp,
 				retries = nmp->nm_retry;
 		} else
 			retries = INT_MAX;
-		/* cred == NULL for DS connects. */
-		if (NFSHASNFSV4N(nmp) && cred != NULL) {
-			/*
-			 * Make sure the nfscbd_pool doesn't get destroyed
-			 * while doing this.
-			 */
-			NFSD_LOCK();
-			if (nfs_numnfscbd > 0) {
-				nfs_numnfscbd++;
-				NFSD_UNLOCK();
-				xprt = svc_vc_create_backchannel(nfscbd_pool);
-				CLNT_CONTROL(client, CLSET_BACKCHANNEL, xprt);
+		if (NFSHASNFSV4N(nmp)) {
+			if (cred != NULL) {
+				/*
+				 * Make sure the nfscbd_pool doesn't get
+				 * destroyed while doing this.
+				 */
 				NFSD_LOCK();
-				nfs_numnfscbd--;
-				if (nfs_numnfscbd == 0)
-					wakeup(&nfs_numnfscbd);
+				if (nfs_numnfscbd > 0) {
+					nfs_numnfscbd++;
+					NFSD_UNLOCK();
+					xprt = svc_vc_create_backchannel(
+					    nfscbd_pool);
+					CLNT_CONTROL(client, CLSET_BACKCHANNEL,
+					    xprt);
+					NFSD_LOCK();
+					nfs_numnfscbd--;
+					if (nfs_numnfscbd == 0)
+						wakeup(&nfs_numnfscbd);
+				}
+				NFSD_UNLOCK();
+			} else {
+				/*
+				 * cred == NULL for a DS connect.
+				 * For connects to a DS, set a retry limit
+				 * so that failed DSs will be detected.
+				 * This is ok for NFSv4.1, since a DS does
+				 * not maintain open/lock state and is the
+				 * only case where using a "soft" mount is
+				 * recommended for NFSv4.
+				 */
+				retries = 2;
 			}
-			NFSD_UNLOCK();
 		}
 	} else {
 		/*
@@ -491,7 +510,7 @@ newnfs_request(struct nfsrv_descript *nd, struct nfsmount *nmp,
 	uint32_t retseq, retval, slotseq, *tl;
 	time_t waituntil;
 	int i = 0, j = 0, opcnt, set_sigset = 0, slot;
-	int trycnt, error = 0, usegssname = 0, secflavour = AUTH_SYS;
+	int error = 0, usegssname = 0, secflavour = AUTH_SYS;
 	int freeslot, maxslot, reterr, slotpos, timeo;
 	u_int16_t procnum;
 	u_int trylater_delay = 1;
@@ -674,7 +693,7 @@ newnfs_request(struct nfsrv_descript *nd, struct nfsmount *nmp,
 		 * outstanding RPCs for nfsv4 client requests.
 		 */
 		if ((nd->nd_flag & ND_NFSV4) && procnum == NFSV4PROC_COMPOUND)
-			MALLOC(rep, struct nfsreq *, sizeof(struct nfsreq),
+			rep = malloc(sizeof(struct nfsreq),
 			    M_NFSDREQ, M_WAITOK);
 #ifdef KDTRACE_HOOKS
 		if (dtrace_nfscl_nfs234_start_probe != NULL) {
@@ -700,7 +719,6 @@ newnfs_request(struct nfsrv_descript *nd, struct nfsmount *nmp,
 		}
 #endif
 	}
-	trycnt = 0;
 	freeslot = -1;		/* Set to slot that needs to be free'd */
 tryagain:
 	slot = -1;		/* Slot that needs a sequence# increment. */
@@ -761,6 +779,7 @@ tryagain:
 	else
 		stat = CLNT_CALL_MBUF(nrp->nr_client, &ext, procnum,
 		    nd->nd_mreq, &nd->nd_mrep, timo);
+	NFSCL_DEBUG(2, "clnt call=%d\n", stat);
 
 	if (rep != NULL) {
 		/*
@@ -788,6 +807,36 @@ tryagain:
 		error = EPROTONOSUPPORT;
 	} else if (stat == RPC_INTR) {
 		error = EINTR;
+	} else if (stat == RPC_CANTSEND || stat == RPC_CANTRECV ||
+	     stat == RPC_SYSTEMERROR) {
+		/* Check for a session slot that needs to be free'd. */
+		if ((nd->nd_flag & (ND_NFSV41 | ND_HASSLOTID)) ==
+		    (ND_NFSV41 | ND_HASSLOTID) && nmp != NULL &&
+		    nd->nd_procnum != NFSPROC_NULL) {
+			/*
+			 * This should only occur when either the MDS or
+			 * a client has an RPC against a DS fail.
+			 * This happens because these cases use "soft"
+			 * connections that can time out and fail.
+			 * The slot used for this RPC is now in a
+			 * non-deterministic state, but if the slot isn't
+			 * free'd, threads can get stuck waiting for a slot.
+			 */
+			if (sep == NULL)
+				sep = nfsmnt_mdssession(nmp);
+			/*
+			 * Bump the sequence# out of range, so that reuse of
+			 * this slot will result in an NFSERR_SEQMISORDERED
+			 * error and not a bogus cached RPC reply.
+			 */
+			mtx_lock(&sep->nfsess_mtx);
+			sep->nfsess_slotseq[nd->nd_slotid] += 10;
+			mtx_unlock(&sep->nfsess_mtx);
+			/* And free the slot. */
+			nfsv4_freeslot(sep, nd->nd_slotid);
+		}
+		NFSINCRGLOBAL(nfsstatsv1.rpcinvalid);
+		error = ENXIO;
 	} else {
 		NFSINCRGLOBAL(nfsstatsv1.rpcinvalid);
 		error = EACCES;
@@ -797,7 +846,7 @@ tryagain:
 		if (usegssname == 0)
 			AUTH_DESTROY(auth);
 		if (rep != NULL)
-			FREE((caddr_t)rep, M_NFSDREQ);
+			free(rep, M_NFSDREQ);
 		if (set_sigset)
 			newnfs_restore_sigmask(td, &oldset);
 		return (error);
@@ -851,9 +900,9 @@ tryagain:
 			if ((nmp != NULL && i == NFSV4OP_SEQUENCE && j != 0) ||
 			    (clp != NULL && i == NFSV4OP_CBSEQUENCE && j != 0))
 				NFSCL_DEBUG(1, "failed seq=%d\n", j);
-			if ((nmp != NULL && i == NFSV4OP_SEQUENCE && j == 0) ||
-			    (clp != NULL && i == NFSV4OP_CBSEQUENCE && j == 0)
-			    ) {
+			if (((nmp != NULL && i == NFSV4OP_SEQUENCE && j == 0) ||
+			    (clp != NULL && i == NFSV4OP_CBSEQUENCE &&
+			    j == 0)) && sep != NULL) {
 				if (i == NFSV4OP_SEQUENCE)
 					NFSM_DISSECT(tl, uint32_t *,
 					    NFSX_V4SESSIONID +
@@ -895,7 +944,8 @@ tryagain:
 		}
 		if (nd->nd_repstat != 0) {
 			if (nd->nd_repstat == NFSERR_BADSESSION &&
-			    nmp != NULL && dssep == NULL) {
+			    nmp != NULL && dssep == NULL &&
+			    (nd->nd_flag & ND_NFSV41) != 0) {
 				/*
 				 * If this is a client side MDS RPC, mark
 				 * the MDS session defunct and initiate
@@ -1097,7 +1147,7 @@ tryagain:
 	if (usegssname == 0)
 		AUTH_DESTROY(auth);
 	if (rep != NULL)
-		FREE((caddr_t)rep, M_NFSDREQ);
+		free(rep, M_NFSDREQ);
 	if (set_sigset)
 		newnfs_restore_sigmask(td, &oldset);
 	return (0);
@@ -1107,7 +1157,7 @@ nfsmout:
 	if (usegssname == 0)
 		AUTH_DESTROY(auth);
 	if (rep != NULL)
-		FREE((caddr_t)rep, M_NFSDREQ);
+		free(rep, M_NFSDREQ);
 	if (set_sigset)
 		newnfs_restore_sigmask(td, &oldset);
 	return (error);
@@ -1121,9 +1171,29 @@ nfsmout:
 int
 newnfs_nmcancelreqs(struct nfsmount *nmp)
 {
+	struct nfsclds *dsp;
+	struct __rpc_client *cl;
 
 	if (nmp->nm_sockreq.nr_client != NULL)
 		CLNT_CLOSE(nmp->nm_sockreq.nr_client);
+lookformore:
+	NFSLOCKMNT(nmp);
+	TAILQ_FOREACH(dsp, &nmp->nm_sess, nfsclds_list) {
+		NFSLOCKDS(dsp);
+		if (dsp != TAILQ_FIRST(&nmp->nm_sess) &&
+		    (dsp->nfsclds_flags & NFSCLDS_CLOSED) == 0 &&
+		    dsp->nfsclds_sockp != NULL &&
+		    dsp->nfsclds_sockp->nr_client != NULL) {
+			dsp->nfsclds_flags |= NFSCLDS_CLOSED;
+			cl = dsp->nfsclds_sockp->nr_client;
+			NFSUNLOCKDS(dsp);
+			NFSUNLOCKMNT(nmp);
+			CLNT_CLOSE(cl);
+			goto lookformore;
+		}
+		NFSUNLOCKDS(dsp);
+	}
+	NFSUNLOCKMNT(nmp);
 	return (0);
 }
 
@@ -1207,8 +1277,7 @@ newnfs_msleep(struct thread *td, void *ident, struct mtx *mtx, int priority, cha
 {
 	sigset_t oldset;
 	int error;
-	struct proc *p;
-	
+
 	if ((priority & PCATCH) == 0)
 		return msleep(ident, mtx, priority, wmesg, timo);
 	if (td == NULL)
@@ -1216,7 +1285,6 @@ newnfs_msleep(struct thread *td, void *ident, struct mtx *mtx, int priority, cha
 	newnfs_set_sigmask(td, &oldset);
 	error = msleep(ident, mtx, priority, wmesg, timo);
 	newnfs_restore_sigmask(td, &oldset);
-	p = td->td_proc;
 	return (error);
 }
 

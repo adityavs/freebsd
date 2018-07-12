@@ -1,4 +1,5 @@
 /*-
+ * Copyright (c) 2017 Oliver Pinter
  * Copyright (c) 2000-2015 Mark R V Murray
  * All rights reserved.
  *
@@ -129,6 +130,12 @@ READ_RANDOM_UIO(struct uio *uio, bool nonblock)
 	uint8_t *random_buf;
 	int error, spamcount;
 	ssize_t read_len, total_read, c;
+	/* 16 MiB takes about 0.08 s CPU time on my 2017 AMD Zen CPU */
+#define SIGCHK_PERIOD (16 * 1024 * 1024)
+	const size_t sigchk_period = SIGCHK_PERIOD;
+
+	CTASSERT(SIGCHK_PERIOD % PAGE_SIZE == 0);
+#undef SIGCHK_PERIOD
 
 	random_buf = malloc(PAGE_SIZE, M_ENTROPY, M_WAITOK);
 	p_random_alg_context->ra_pre_read();
@@ -166,11 +173,22 @@ READ_RANDOM_UIO(struct uio *uio, bool nonblock)
 			read_len = MIN(read_len, PAGE_SIZE);
 			p_random_alg_context->ra_read(random_buf, read_len);
 			c = MIN(uio->uio_resid, read_len);
+			/*
+			 * uiomove() may yield the CPU before each 'c' bytes
+			 * (up to PAGE_SIZE) are copied out.
+			 */
 			error = uiomove(random_buf, c, uio);
 			total_read += c;
+			/*
+			 * Poll for signals every few MBs to avoid very long
+			 * uninterruptible syscalls.
+			 */
+			if (error == 0 && uio->uio_resid != 0 &&
+			    total_read % sigchk_period == 0)
+				error = tsleep_sbt(&random_alg_context, PCATCH,
+				    "randrd", SBT_1NS, 0, C_HARDCLOCK);
 		}
-		if (total_read != uio->uio_resid && (error == ERESTART || error == EINTR))
-			/* Return partial read, not error. */
+		if (error == ERESTART || error == EINTR)
 			error = 0;
 	}
 	free(random_buf, M_ENTROPY);
@@ -321,6 +339,8 @@ random_source_register(struct random_source *rsource)
 	rrs = malloc(sizeof(*rrs), M_ENTROPY, M_WAITOK);
 	rrs->rrs_source = rsource;
 
+	random_harvest_register_source(rsource->rs_source);
+
 	printf("random: registering fast source %s\n", rsource->rs_ident);
 	LIST_INSERT_HEAD(&source_list, rrs, rrs_entries);
 }
@@ -331,6 +351,9 @@ random_source_deregister(struct random_source *rsource)
 	struct random_sources *rrs = NULL;
 
 	KASSERT(rsource != NULL, ("invalid input to %s", __func__));
+
+	random_harvest_deregister_source(rsource->rs_source);
+
 	LIST_FOREACH(rrs, &source_list, rrs_entries)
 		if (rrs->rrs_source == rsource) {
 			LIST_REMOVE(rrs, rrs_entries);

@@ -5,7 +5,7 @@
 #
 
 include 	"../mv/armada38x/std.armada38x"
-include 	"std.armv6"
+include 	"std.armv7"
 
 ident 	ARMADA38X
 
@@ -47,9 +47,6 @@ device		neta
 
 # PCI
 device		pci
-
-# RTC
-device		mv_rtc
 
 # Interrupt controllers
 device		gic
@@ -96,5 +93,11 @@ device		cryptodev
 # L2 Cache
 device		pl310
 
+options		PLATFORM
+
 # FDT
 options 	FDT
+
+# GPIO
+device gpio
+device gpioled

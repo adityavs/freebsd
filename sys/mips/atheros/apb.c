@@ -1,4 +1,6 @@
 /*-
+ * SPDX-License-Identifier: BSD-2-Clause-FreeBSD
+ *
  * Copyright (c) 2009, Oleksandr Tymoshenko <gonzo@FreeBSD.org>
  * All rights reserved.
  *
@@ -386,7 +388,7 @@ apb_filter(void *arg)
 					tf = td->td_intr_frame;
 
 					if (pmc_intr)
-						(*pmc_intr)(PCPU_GET(cpuid), tf);
+						(*pmc_intr)(tf);
 					continue;
 				}
 				/* Ignore timer interrupts */

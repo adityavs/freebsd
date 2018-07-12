@@ -1,4 +1,6 @@
 /*-
+ * SPDX-License-Identifier: (BSD-2-Clause-FreeBSD AND BSD-3-Clause)
+ *
  * Copyright (c) 2002 Networks Associates Technology, Inc.
  * All rights reserved.
  *
@@ -86,6 +88,7 @@ __FBSDID("$FreeBSD$");
 #include <security/audit/audit.h>
 
 #include <geom/geom.h>
+#include <geom/geom_vfs.h>
 
 #include <ufs/ufs/dir.h>
 #include <ufs/ufs/extattr.h>
@@ -107,7 +110,7 @@ static ufs2_daddr_t
 static void	ffs_blkfree_cg(struct ufsmount *, struct fs *,
 		    struct vnode *, ufs2_daddr_t, long, ino_t,
 		    struct workhead *);
-static void	ffs_blkfree_trim_completed(struct bio *);
+static void	ffs_blkfree_trim_completed(struct buf *);
 static void	ffs_blkfree_trim_task(void *ctx, int pending __unused);
 #ifdef INVARIANTS
 static int	ffs_checkblk(struct inode *, ufs2_daddr_t, long);
@@ -492,7 +495,7 @@ ffs_reallocblks(ap)
 	 * optimization. Also skip if reallocblks has been disabled globally.
 	 */
 	ump = ap->a_vp->v_mount->mnt_data;
-	if (ump->um_candelete || doreallocblks == 0)
+	if (((ump->um_flags) & UM_CANDELETE) != 0 || doreallocblks == 0)
 		return (ENOSPC);
 
 	/*
@@ -1956,6 +1959,16 @@ getinobuf(struct inode *ip, u_int cg, u_int32_t cginoblk, int gbflags)
 }
 
 /*
+ * Synchronous inode initialization is needed only when barrier writes do not
+ * work as advertised, and will impose a heavy cost on file creation in a newly
+ * created filesystem.
+ */
+static int doasyncinodeinit = 1;
+SYSCTL_INT(_vfs_ffs, OID_AUTO, doasyncinodeinit, CTLFLAG_RWTUN,
+    &doasyncinodeinit, 0,
+    "Perform inode block initialization using asynchronous writes");
+
+/*
  * Determine whether an inode can be allocated.
  *
  * Check to see if an inode is available, and if it is,
@@ -2063,6 +2076,7 @@ gotit:
 				dp2->di_gen = arc4random();
 			dp2++;
 		}
+
 		/*
 		 * Rather than adding a soft updates dependency to ensure
 		 * that the new inode block is written before it is claimed
@@ -2072,7 +2086,10 @@ gotit:
 		 * written. The barrier write should only slow down bulk
 		 * loading of newly created filesystems.
 		 */
-		babarrierwrite(ibp);
+		if (doasyncinodeinit)
+			babarrierwrite(ibp);
+		else
+			bwrite(ibp);
 
 		/*
 		 * After the inode block is written, try to update the
@@ -2264,13 +2281,13 @@ ffs_blkfree_trim_task(ctx, pending)
 }
 
 static void
-ffs_blkfree_trim_completed(bip)
-	struct bio *bip;
+ffs_blkfree_trim_completed(bp)
+	struct buf *bp;
 {
 	struct ffs_blkfree_trim_params *tp;
 
-	tp = bip->bio_caller2;
-	g_destroy_bio(bip);
+	tp = bp->b_fsprivate1;
+	free(bp, M_TEMP);
 	TASK_INIT(&tp->task, 0, ffs_blkfree_trim_task, tp);
 	taskqueue_enqueue(tp->ump->um_trim_tq, &tp->task);
 }
@@ -2287,7 +2304,7 @@ ffs_blkfree(ump, fs, devvp, bno, size, inum, vtype, dephd)
 	struct workhead *dephd;
 {
 	struct mount *mp;
-	struct bio *bip;
+	struct buf *bp;
 	struct ffs_blkfree_trim_params *tp;
 
 	/*
@@ -2305,7 +2322,7 @@ ffs_blkfree(ump, fs, devvp, bno, size, inum, vtype, dephd)
 	 * Nothing to delay if TRIM is disabled, or the operation is
 	 * performed on the snapshot.
 	 */
-	if (!ump->um_candelete || devvp->v_type == VREG) {
+	if (((ump->um_flags) & UM_CANDELETE) == 0 || devvp->v_type == VREG) {
 		ffs_blkfree_cg(ump, fs, devvp, bno, size, inum, dephd);
 		return;
 	}
@@ -2330,16 +2347,16 @@ ffs_blkfree(ump, fs, devvp, bno, size, inum, vtype, dephd)
 	} else
 		tp->pdephd = NULL;
 
-	bip = g_alloc_bio();
-	bip->bio_cmd = BIO_DELETE;
-	bip->bio_offset = dbtob(fsbtodb(fs, bno));
-	bip->bio_done = ffs_blkfree_trim_completed;
-	bip->bio_length = size;
-	bip->bio_caller2 = tp;
+	bp = malloc(sizeof(*bp), M_TEMP, M_WAITOK | M_ZERO);
+	bp->b_iocmd = BIO_DELETE;
+	bp->b_iooffset = dbtob(fsbtodb(fs, bno));
+	bp->b_iodone = ffs_blkfree_trim_completed;
+	bp->b_bcount = size;
+	bp->b_fsprivate1 = tp;
 
 	mp = UFSTOVFS(ump);
 	vn_start_secondary_write(NULL, &mp, 0);
-	g_io_request(bip, (struct g_consumer *)devvp->v_bufobj.bo_private);
+	g_vfs_strategy(ump->um_bo, bp);
 }
 
 #ifdef INVARIANTS
@@ -2398,13 +2415,11 @@ ffs_vfree(pvp, ino, mode)
 	int mode;
 {
 	struct ufsmount *ump;
-	struct inode *ip;
 
 	if (DOINGSOFTDEP(pvp)) {
 		softdep_freefile(pvp, ino, mode);
 		return (0);
 	}
-	ip = VTOI(pvp);
 	ump = VFSTOUFS(pvp->v_mount);
 	return (ffs_freefile(ump, ump->um_fs, ump->um_devvp, ino, mode, NULL));
 }
@@ -2424,7 +2439,6 @@ ffs_freefile(ump, fs, devvp, ino, mode, wkhd)
 {
 	struct cg *cgp;
 	struct buf *bp;
-	ufs2_daddr_t cgbno;
 	int error;
 	u_int cg;
 	u_int8_t *inosused;
@@ -2435,11 +2449,9 @@ ffs_freefile(ump, fs, devvp, ino, mode, wkhd)
 		/* devvp is a snapshot */
 		MPASS(devvp->v_mount->mnt_data == ump);
 		dev = ump->um_devvp->v_rdev;
-		cgbno = fragstoblks(fs, cgtod(fs, cg));
 	} else if (devvp->v_type == VCHR) {
 		/* devvp is a normal disk device */
 		dev = devvp->v_rdev;
-		cgbno = fsbtodb(fs, cgtod(fs, cg));
 	} else {
 		bp = NULL;
 		return (0);
@@ -2491,21 +2503,13 @@ ffs_checkfreefile(fs, devvp, ino)
 {
 	struct cg *cgp;
 	struct buf *bp;
-	ufs2_daddr_t cgbno;
 	int ret, error;
 	u_int cg;
 	u_int8_t *inosused;
 
 	cg = ino_to_cg(fs, ino);
-	if (devvp->v_type == VREG) {
-		/* devvp is a snapshot */
-		cgbno = fragstoblks(fs, cgtod(fs, cg));
-	} else if (devvp->v_type == VCHR) {
-		/* devvp is a normal disk device */
-		cgbno = fsbtodb(fs, cgtod(fs, cg));
-	} else {
+	if ((devvp->v_type != VREG) && (devvp->v_type != VCHR))
 		return (1);
-	}
 	if (ino >= fs->fs_ipg * fs->fs_ncg)
 		return (1);
 	if ((error = ffs_getcg(fs, devvp, cg, &bp, &cgp)) != 0)
@@ -2584,6 +2588,15 @@ ffs_mapsearch(fs, cgp, bpref, allocsiz)
 	return (-1);
 }
 
+static const struct statfs *
+ffs_getmntstat(struct vnode *devvp)
+{
+
+	if (devvp->v_type == VCHR)
+		return (&devvp->v_rdev->si_mountpt->mnt_stat);
+	return (ffs_getmntstat(VFSTOUFS(devvp->v_mount)->um_devvp));
+}
+
 /*
  * Fetch and verify a cylinder group.
  */
@@ -2597,6 +2610,7 @@ ffs_getcg(fs, devvp, cg, bpp, cgpp)
 {
 	struct buf *bp;
 	struct cg *cgp;
+	const struct statfs *sfs;
 	int flags, error;
 
 	*bpp = NULL;
@@ -2611,12 +2625,31 @@ ffs_getcg(fs, devvp, cg, bpp, cgpp)
 	if (error != 0)
 		return (error);
 	cgp = (struct cg *)bp->b_data;
-	if (((fs->fs_metackhash & CK_CYLGRP) != 0 &&
+	if ((fs->fs_metackhash & CK_CYLGRP) != 0 &&
 	    (bp->b_flags & B_CKHASH) != 0 &&
-	    cgp->cg_ckhash != bp->b_ckhash) ||
-	    !cg_chkmagic(cgp) || cgp->cg_cgx != cg) {
-		printf("checksum failed: cg %u, cgp: 0x%x != bp: 0x%jx\n",
+	    cgp->cg_ckhash != bp->b_ckhash) {
+		sfs = ffs_getmntstat(devvp);
+		printf("UFS %s%s (%s) cylinder checksum failed: cg %u, cgp: "
+		    "0x%x != bp: 0x%jx\n",
+		    devvp->v_type == VCHR ? "" : "snapshot of ",
+		    sfs->f_mntfromname, sfs->f_mntonname,
 		    cg, cgp->cg_ckhash, (uintmax_t)bp->b_ckhash);
+		bp->b_flags &= ~B_CKHASH;
+		bp->b_flags |= B_INVAL | B_NOCACHE;
+		brelse(bp);
+		return (EIO);
+	}
+	if (!cg_chkmagic(cgp) || cgp->cg_cgx != cg) {
+		sfs = ffs_getmntstat(devvp);
+		printf("UFS %s%s (%s)",
+		    devvp->v_type == VCHR ? "" : "snapshot of ",
+		    sfs->f_mntfromname, sfs->f_mntonname);
+		if (!cg_chkmagic(cgp))
+			printf(" cg %u: bad magic number 0x%x should be 0x%x\n",
+			    cg, cgp->cg_magic, CG_MAGIC);
+		else
+			printf(": wrong cylinder group cg %u != cgx %u\n", cg,
+			    cgp->cg_cgx);
 		bp->b_flags &= ~B_CKHASH;
 		bp->b_flags |= B_INVAL | B_NOCACHE;
 		brelse(bp);
@@ -2624,9 +2657,18 @@ ffs_getcg(fs, devvp, cg, bpp, cgpp)
 	}
 	bp->b_flags &= ~B_CKHASH;
 	bp->b_xflags |= BX_BKGRDWRITE;
+	/*
+	 * If we are using check hashes on the cylinder group then we want
+	 * to limit changing the cylinder group time to when we are actually
+	 * going to write it to disk so that its check hash remains correct
+	 * in memory. If the CK_CYLGRP flag is set the time is updated in
+	 * ffs_bufwrite() as the buffer is queued for writing. Otherwise we
+	 * update the time here as we have done historically.
+	 */
 	if ((fs->fs_metackhash & CK_CYLGRP) != 0)
 		bp->b_xflags |= BX_CYLGRP;
-	cgp->cg_old_time = cgp->cg_time = time_second;
+	else
+		cgp->cg_old_time = cgp->cg_time = time_second;
 	*bpp = bp;
 	*cgpp = cgp;
 	return (0);

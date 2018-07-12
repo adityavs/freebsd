@@ -1,4 +1,6 @@
-/*
+/*-
+ * SPDX-License-Identifier: BSD-3-Clause
+ *
  * Copyright (c) 1980, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -116,7 +118,7 @@ main(int argc, char **argv)
 	printmachine = 0;
 	kernfile = NULL;
 	SLIST_INIT(&includepath);
-	while ((ch = getopt(argc, argv, "CI:d:gmpsVx:")) != -1)
+	while ((ch = getopt(argc, argv, "CI:d:gmps:Vx:")) != -1)
 		switch (ch) {
 		case 'C':
 			filebased = 1;
@@ -202,6 +204,7 @@ main(int argc, char **argv)
 	STAILQ_INIT(&fntab);
 	STAILQ_INIT(&ftab);
 	STAILQ_INIT(&hints);
+	STAILQ_INIT(&envvars);
 	if (yyparse())
 		exit(3);
 

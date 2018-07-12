@@ -1,4 +1,6 @@
 /*-
+ * SPDX-License-Identifier: BSD-3-Clause
+ *
  * Copyright (c) 1989, 1993
  *	The Regents of the University of California.  All rights reserved.
  * (c) UNIX System Laboratories, Inc.
@@ -49,7 +51,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/mbuf.h>
 #include <sys/mount.h>
 #include <sys/mutex.h>
-#include <sys/rwlock.h>
+#include <sys/rmlock.h>
 #include <sys/refcount.h>
 #include <sys/signalvar.h>
 #include <sys/socket.h>
@@ -410,7 +412,7 @@ vfs_setpublicfs(struct mount *mp, struct netexport *nep,
 	 * If an indexfile was specified, pull it in.
 	 */
 	if (argp->ex_indexfile != NULL) {
-		if (nfs_pub.np_index != NULL)
+		if (nfs_pub.np_index == NULL)
 			nfs_pub.np_index = malloc(MAXNAMLEN + 1, M_TEMP,
 			    M_WAITOK);
 		error = copyinstr(argp->ex_indexfile, nfs_pub.np_index,
@@ -447,6 +449,7 @@ vfs_setpublicfs(struct mount *mp, struct netexport *nep,
 static struct netcred *
 vfs_export_lookup(struct mount *mp, struct sockaddr *nam)
 {
+	RADIX_NODE_HEAD_RLOCK_TRACKER;
 	struct netexport *nep;
 	struct netcred *np = NULL;
 	struct radix_node_head *rnh;
@@ -459,34 +462,33 @@ vfs_export_lookup(struct mount *mp, struct sockaddr *nam)
 		return (NULL);
 
 	/*
-	 * If no address is provided, use the default if it exists.
+	 * Lookup in the export list
 	 */
-	if (nam == NULL) {
-		if ((mp->mnt_flag & MNT_DEFEXPORTED) != 0)
-			return (&nep->ne_defexported);
-		return (NULL);
+	if (nam != NULL) {
+		saddr = nam;
+		rnh = NULL;
+		switch (saddr->sa_family) {
+		case AF_INET:
+			rnh = nep->ne4;
+			break;
+		case AF_INET6:
+			rnh = nep->ne6;
+			break;
+		}
+		if (rnh != NULL) {
+			RADIX_NODE_HEAD_RLOCK(rnh);
+			np = (struct netcred *) (*rnh->rnh_matchaddr)(saddr, &rnh->rh);
+			RADIX_NODE_HEAD_RUNLOCK(rnh);
+			if (np != NULL && (np->netc_rnodes->rn_flags & RNF_ROOT) != 0)
+				return (NULL);
+		}
 	}
 
 	/*
-	 * Lookup in the export list
+	 * If no address match, use the default if it exists.
 	 */
-	saddr = nam;
-	rnh = NULL;
-	switch (saddr->sa_family) {
-	case AF_INET:
-		rnh = nep->ne4;
-		break;
-	case AF_INET6:
-		rnh = nep->ne6;
-		break;
-	}
-	if (rnh != NULL) {
-		RADIX_NODE_HEAD_RLOCK(rnh);
-		np = (struct netcred *) (*rnh->rnh_matchaddr)(saddr, &rnh->rh);
-		RADIX_NODE_HEAD_RUNLOCK(rnh);
-		if (np != NULL && (np->netc_rnodes->rn_flags & RNF_ROOT) != 0)
-			return (NULL);
-	}
+	if (np == NULL && (mp->mnt_flag & MNT_DEFEXPORTED) != 0)
+		return (&nep->ne_defexported);
 
 	return (np);
 }

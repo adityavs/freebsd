@@ -221,7 +221,7 @@ arm64_cpu_attach(device_t dev)
 static void
 release_aps(void *dummy __unused)
 {
-	int i;
+	int i, started;
 
 	/* Only release CPUs if they exist */
 	if (mp_ncpus == 1)
@@ -236,13 +236,27 @@ release_aps(void *dummy __unused)
 
 	atomic_store_rel_int(&aps_ready, 1);
 	/* Wake up the other CPUs */
-	__asm __volatile("sev");
+	__asm __volatile(
+	    "dsb ishst	\n"
+	    "sev	\n"
+	    ::: "memory");
 
-	printf("Release APs\n");
+	printf("Release APs...");
 
+	started = 0;
 	for (i = 0; i < 2000; i++) {
-		if (smp_started)
+		if (smp_started) {
+			printf("done\n");
 			return;
+		}
+		/*
+		 * Don't time out while we are making progress. Some large
+		 * systems can take a while to start all CPUs.
+		 */
+		if (smp_cpus > started) {
+			i = 0;
+			started = smp_cpus;
+		}
 		DELAY(1000);
 	}
 
@@ -279,6 +293,7 @@ init_secondary(uint64_t cpu)
 	 * runtime chip identification.
 	 */
 	identify_cpu();
+	install_cpu_errata();
 
 	intr_pic_init_secondary();
 

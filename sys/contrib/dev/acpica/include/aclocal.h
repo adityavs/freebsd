@@ -8,7 +8,7 @@
  *
  * 1. Copyright Notice
  *
- * Some or all of this work - Copyright (c) 1999 - 2017, Intel Corp.
+ * Some or all of this work - Copyright (c) 1999 - 2018, Intel Corp.
  * All rights reserved.
  *
  * 2. License
@@ -328,7 +328,6 @@ typedef struct acpi_namespace_node
 #define ANOBJ_EVALUATED                 0x20    /* Set on first evaluation of node */
 #define ANOBJ_ALLOCATED_BUFFER          0x40    /* Method AML buffer is dynamic (InstallMethod) */
 
-#define IMPLICIT_EXTERNAL               0x02    /* iASL only: This object created implicitly via External */
 #define ANOBJ_IS_EXTERNAL               0x08    /* iASL only: This object created via External() */
 #define ANOBJ_METHOD_NO_RETVAL          0x10    /* iASL only: Method has no return value */
 #define ANOBJ_METHOD_SOME_NO_RETVAL     0x20    /* iASL only: Method has at least one return value */
@@ -834,7 +833,7 @@ typedef struct acpi_control_state
     union acpi_parse_object         *PredicateOp;
     UINT8                           *AmlPredicateStart;     /* Start of if/while predicate */
     UINT8                           *PackageEnd;            /* End of if/while block */
-    UINT32                          LoopCount;              /* While() loop counter */
+    UINT64                          LoopTimeout;            /* While() loop timeout */
 
 } ACPI_CONTROL_STATE;
 
@@ -1532,16 +1531,17 @@ typedef struct acpi_db_method_info
     ACPI_OBJECT_TYPE                *Types;
 
     /*
-     * Arguments to be passed to method for the command
-     * Threads -
-     *   the Number of threads, ID of current thread and
-     *   Index of current thread inside all them created.
+     * Arguments to be passed to method for the commands Threads and
+     * Background. Note, ACPI specifies a maximum of 7 arguments (0 - 6).
+     *
+     * For the Threads command, the Number of threads, ID of current
+     * thread and Index of current thread inside all them created.
      */
     char                            InitArgs;
 #ifdef ACPI_DEBUGGER
-    ACPI_OBJECT_TYPE                ArgTypes[4];
+    ACPI_OBJECT_TYPE                ArgTypes[ACPI_METHOD_NUM_ARGS];
 #endif
-    char                            *Arguments[4];
+    char                            *Arguments[ACPI_METHOD_NUM_ARGS];
     char                            NumThreadsStr[11];
     char                            IdOfThreadStr[11];
     char                            IndexOfThreadStr[11];
